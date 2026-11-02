@@ -39,7 +39,7 @@ const generateSessionId = () => {
 // Record an authenticated login session in MongoDB
 const recordLoginSession = async (user, req) => {
   try {
-    if (!isDatabaseConnected() || !req) return null;
+    if (!req || (!isDatabaseConnected() && (!MongoDb || !MongoDb.isAvailable()))) return null;
     const sessionId = generateSessionId();
     const ua = (req.headers && req.headers['user-agent']) || '';
     const parsedUa = parseUserAgent(ua);
@@ -534,7 +534,7 @@ const loginUser = async (req, res) => {
 const logoutUser = async (req, res) => {
   try {
     const sessionId = req.currentSessionId || req.body?.sessionId;
-    if (sessionId && isDatabaseConnected()) {
+    if (sessionId && (isDatabaseConnected() || (MongoDb && MongoDb.isAvailable()))) {
       await MongoDb.sessions.updateOne(
         { sessionId },
         { $set: { isRevoked: true, revokedAt: new Date() } }
@@ -621,7 +621,7 @@ const revokeSession = async (req, res) => {
       });
     }
 
-    if (!isDatabaseConnected()) {
+    if (!isDatabaseConnected() && (!MongoDb || !MongoDb.isAvailable())) {
       return res.status(503).json({
         success: false,
         message: 'Database service is currently unavailable'
@@ -672,7 +672,7 @@ const revokeAllOtherSessions = async (req, res) => {
     const userId = req.user?._id || req.user?.id;
     const currentSessionId = req.currentSessionId || null;
 
-    if (!isDatabaseConnected()) {
+    if (!isDatabaseConnected() && (!MongoDb || !MongoDb.isAvailable())) {
       return res.status(503).json({
         success: false,
         message: 'Database service is currently unavailable'

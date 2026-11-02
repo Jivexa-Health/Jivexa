@@ -40,13 +40,13 @@ const protect = async (req, res, next) => {
       });
     }
 
-    // Lookup user in MongoDB
+    // Lookup user in MongoDB or resilient store
     let user = null;
     if (decoded.id) {
-      user = await User.findOne({ _id: String(decoded.id) });
+      user = await MongoDb.users.findById(decoded.id);
     }
     if (!user && decoded.email) {
-      user = await User.findOne({ email: String(decoded.email).toLowerCase().trim() });
+      user = await MongoDb.users.findOne({ email: String(decoded.email).toLowerCase().trim() });
     }
 
     if (!user) {
@@ -57,7 +57,7 @@ const protect = async (req, res, next) => {
     }
 
     // Server-side Session Revocation & Expiration Check
-    if (decoded.sessionId && isDatabaseConnected()) {
+    if (decoded.sessionId) {
       const session = await MongoDb.sessions.findOne({ sessionId: decoded.sessionId });
       if (session) {
         if (session.isRevoked) {
@@ -120,10 +120,10 @@ const optionalProtect = async (req, res, next) => {
 
     let user = null;
     if (decoded.id) {
-      user = await User.findOne({ _id: String(decoded.id) });
+      user = await MongoDb.users.findById(decoded.id);
     }
     if (!user && decoded.email) {
-      user = await User.findOne({ email: String(decoded.email).toLowerCase().trim() });
+      user = await MongoDb.users.findOne({ email: String(decoded.email).toLowerCase().trim() });
     }
 
     req.user = user || null;

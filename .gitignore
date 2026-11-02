@@ -29,3 +29,6 @@ Thumbs.db
 .idea/
 scratch/
 backup/
+
+*.local_db.json
+.local_db.json

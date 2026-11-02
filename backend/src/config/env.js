@@ -45,7 +45,7 @@ const config = {
   // Server & Network
   server: {
     port: parseInt(process.env.PORT, 10) || 4000,
-    host: cleanString(process.env.HOST) || '0.0.0.0',
+    host: cleanString(process.env.HOST) || '',
     nodeEnv: cleanString(process.env.NODE_ENV) || 'development',
     isProduction: cleanString(process.env.NODE_ENV) === 'production',
     frontendUrl: cleanString(process.env.FRONTEND_URL) || 'http://localhost:5173'

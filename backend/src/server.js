@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 const mongoose = require('mongoose');
 
 const { connectDB, isMongoConfigured, checkDatabaseHealth, isDatabaseConnected } = require('./config/db');
+const { MongoDb } = require('./services/mongoDbService');
 
 const app = express();
 
@@ -40,9 +41,9 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// Database connection fail-fast guard middleware for auth endpoints
+// Database connection guard middleware for auth endpoints
 const requireDbConnection = (req, res, next) => {
-  if (mongoose.connection.readyState !== 1) {
+  if (!isDatabaseConnected() && (!MongoDb || !MongoDb.isAvailable || !MongoDb.isAvailable())) {
     return res.status(503).json({
       success: false,
       error: 'Database is not connected',
@@ -73,13 +74,16 @@ app.get('/api/health', async (req, res) => {
     dbStatus = { configured: isMongo, connected: false, error: e.message };
   }
 
+  const isConnected = Boolean(dbStatus.connected);
+  const isResilientReady = Boolean(MongoDb && MongoDb.isAvailable && MongoDb.isAvailable());
+
   res.json({
-    status: dbStatus.connected ? 'OK' : 'DEGRADED',
+    status: isConnected ? 'OK' : (isResilientReady ? 'STANDBY' : 'DEGRADED'),
     service: 'JIVEXA Health OS Backend Service',
-    database: 'MongoDB Atlas',
-    activeDatabase: dbStatus.connected
+    database: isConnected ? 'MongoDB Atlas' : (isResilientReady ? 'MongoDB Atlas (Standby / Local Resilient Mode)' : 'MongoDB Atlas (Unreachable)'),
+    activeDatabase: isConnected
       ? 'MongoDB Atlas'
-      : (isMongo ? 'MongoDB Atlas (Unreachable)' : 'DISCONNECTED'),
+      : (isResilientReady ? 'Local Resilient Storage (Atlas Standby)' : 'DISCONNECTED'),
     authProvider: 'Native JWT / MongoDB Auth',
     otp: {
       enabled: config.auth.otpEnabled,
@@ -165,14 +169,16 @@ const startServer = async () => {
       console.warn('[MongoDB] Database URI (MONGO_URI / MONGO_URL) is not set in backend/.env. Server will run in degraded mode until configured.');
     }
 
-    // 2. Start Express server and attach error listeners explicitly on 0.0.0.0
-    const server = app.listen(PORT, HOST, () => {
+    // 2. Start Express server and attach error listeners (dual-stack listening)
+    const listenCallback = () => {
       console.log(
         `[JIVEXA Backend] Production-Grade Auth Server running in ${
           config.server.nodeEnv
-        } mode on http://localhost:${PORT} (bound to ${HOST}:${PORT})`
+        } mode on http://localhost:${PORT} (dual-stack listening on port ${PORT})`
       );
-    });
+    };
+
+    const server = HOST ? app.listen(PORT, HOST, listenCallback) : app.listen(PORT, listenCallback);
 
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {

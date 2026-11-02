@@ -47,6 +47,45 @@ export const getBackendUrl = (): string => {
   return 'https://jivexa-main.onrender.com';
 };
 
+/**
+ * Returns prioritized backend URLs for fallback connectivity.
+ * Guarantees localhost URLs are never attempted in production environments.
+ */
+export const getBackendUrls = (): string[] => {
+  const isLocalDev =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname === '0.0.0.0');
+
+  const urls: string[] = [];
+  const primaryUrl = getBackendUrl();
+  if (primaryUrl && !urls.includes(primaryUrl)) {
+    urls.push(primaryUrl);
+  }
+
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('jivexa_backend_url')) {
+    const local = localStorage.getItem('jivexa_backend_url')!.replace(/\/$/, '');
+    const isStoredLocal =
+      local.includes('localhost') || local.includes('127.0.0.1') || local.includes('0.0.0.0');
+    if (isLocalDev || !isStoredLocal) {
+      if (!urls.includes(local)) urls.push(local);
+    }
+  }
+
+  const defaults = isLocalDev
+    ? ['http://localhost:4000', 'http://127.0.0.1:4000', '', 'https://jivexa-main.onrender.com']
+    : ['https://jivexa-main.onrender.com'];
+
+  for (const d of defaults) {
+    if (!urls.includes(d)) {
+      urls.push(d);
+    }
+  }
+
+  return urls;
+};
+
 // Safe JSON parser to handle non-JSON responses
 const safeFetchJson = async (url: string, options: RequestInit): Promise<{ ok: boolean; status: number; data: any }> => {
   try {
@@ -71,6 +110,39 @@ const safeFetchJson = async (url: string, options: RequestInit): Promise<{ ok: b
   }
 };
 
+/**
+ * Resilient multi-endpoint fetch that falls back to alternate candidate URLs
+ * if a network failure (status 0 / Failed to fetch) occurs.
+ */
+const safeFetchWithFallback = async (
+  path: string,
+  options: RequestInit
+): Promise<{ ok: boolean; status: number; data: any; usedUrl: string }> => {
+  const candidateUrls = getBackendUrls();
+  let lastResult: { ok: boolean; status: number; data: any; usedUrl: string } = {
+    ok: false,
+    status: 0,
+    data: { error: 'Network connection failed' },
+    usedUrl: candidateUrls[0] || ''
+  };
+
+  for (const baseUrl of candidateUrls) {
+    const cleanBase = baseUrl ? baseUrl.replace(/\/$/, '') : '';
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    const fullUrl = cleanBase ? `${cleanBase}${cleanPath}` : cleanPath;
+
+    const res = await safeFetchJson(fullUrl, options);
+    lastResult = { ...res, usedUrl: baseUrl };
+
+    // If server responded with an HTTP status code (even 4xx/5xx), network connection was established
+    if (res.status > 0) {
+      return lastResult;
+    }
+  }
+
+  return lastResult;
+};
+
 export interface NodeAuthResponse {
   success: boolean;
   message?: string;
@@ -89,8 +161,7 @@ export interface NodeAuthResponse {
 
 export const nodeAuthResendVerification = async (email: string): Promise<NodeAuthResponse> => {
   try {
-    const backendUrl = getBackendUrl();
-    const res = await safeFetchJson(`${backendUrl}/api/auth/resend-verification`, {
+    const res = await safeFetchWithFallback('/api/auth/resend-verification', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email })
@@ -119,7 +190,6 @@ export const nodeAuthSignup = async (
   extraFields?: Record<string, any>
 ): Promise<NodeAuthResponse> => {
   try {
-    const backendUrl = getBackendUrl();
     const bodyObj = { name, email, password, role, ...extraFields };
     const options: RequestInit = {
       method: 'POST',
@@ -128,15 +198,15 @@ export const nodeAuthSignup = async (
       body: JSON.stringify(bodyObj)
     };
 
-    // Canonical endpoint: POST /api/auth/signup
-    const res = await safeFetchJson(`${backendUrl}/api/auth/signup`, options);
+    // Canonical endpoint: POST /api/auth/signup with multi-endpoint fallback
+    const res = await safeFetchWithFallback('/api/auth/signup', options);
 
     if (!res.ok) {
       const errMsg = res.data?.message || res.data?.error || 'Registration failed on server.';
       if (res.status === 0 || errMsg.toLowerCase().includes('failed to fetch')) {
         return {
           success: false,
-          error: `Could not connect to authentication server (${backendUrl}). Network connection failed.`
+          error: `Could not connect to authentication server (${res.usedUrl || getBackendUrl()}). Network connection failed.`
         };
       }
       return {
@@ -180,7 +250,6 @@ export const nodeAuthLogin = async (
   role?: UserRole
 ): Promise<NodeAuthResponse> => {
   try {
-    const backendUrl = getBackendUrl();
     const options: RequestInit = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -188,15 +257,15 @@ export const nodeAuthLogin = async (
       body: JSON.stringify({ email, password, role })
     };
 
-    // Canonical endpoint: POST /api/auth/login
-    const res = await safeFetchJson(`${backendUrl}/api/auth/login`, options);
+    // Canonical endpoint: POST /api/auth/login with multi-endpoint fallback
+    const res = await safeFetchWithFallback('/api/auth/login', options);
 
     if (!res.ok) {
       const errMsg = res.data?.message || res.data?.error || 'Invalid credentials.';
       if (res.status === 0 || errMsg.toLowerCase().includes('failed to fetch')) {
         return {
           success: false,
-          error: `Could not connect to authentication server (${backendUrl}). Network connection failed.`
+          error: `Could not connect to authentication server (${res.usedUrl || getBackendUrl()}). Network connection failed.`
         };
       }
       return {
@@ -231,15 +300,14 @@ export const nodeAuthLogin = async (
 
 export const nodeAuthLogout = async (): Promise<NodeAuthResponse> => {
   try {
-    const backendUrl = getBackendUrl();
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    // Canonical endpoint: POST /api/auth/logout
-    await fetch(`${backendUrl}/api/auth/logout`, {
+    // Canonical endpoint: POST /api/auth/logout with fallback
+    await safeFetchWithFallback('/api/auth/logout', {
       method: 'POST',
       headers,
       credentials: 'include'
@@ -257,34 +325,31 @@ export const nodeAuthGetMe = async (): Promise<NodeAuthResponse> => {
   try {
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
     if (!token) {
-      // User is not logged in; return gracefully without unauthenticated network 401 errors
       return { success: false, unauthenticated: true };
     }
 
-    const backendUrl = getBackendUrl();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`
     };
 
-    // Canonical endpoint: GET /api/auth/me
-    const response = await fetch(`${backendUrl}/api/auth/me`, {
+    // Canonical endpoint: GET /api/auth/me with fallback
+    const res = await safeFetchWithFallback('/api/auth/me', {
       method: 'GET',
       headers,
       credentials: 'include'
     });
 
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
         localStorage.removeItem('jivexa_node_jwt_token');
       }
       return { success: false, error: 'Session expired' };
     }
 
-    const data = await response.json();
     return {
       success: true,
-      user: data.user
+      user: res.data?.user
     };
   } catch (err: any) {
     return { success: false, error: 'Backend session lookup skipped' };
@@ -293,24 +358,21 @@ export const nodeAuthGetMe = async (): Promise<NodeAuthResponse> => {
 
 export const nodeAuthSendOTP = async (email: string): Promise<NodeAuthResponse> => {
   try {
-    const backendUrl = getBackendUrl();
-    // Canonical endpoint: POST /api/auth/send-otp
-    const response = await fetch(`${backendUrl}/api/auth/send-otp`, {
+    const res = await safeFetchWithFallback('/api/auth/send-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email })
     });
 
-    const data = await response.json();
-    if (!response.ok) {
-      return { success: false, error: data.message || data.error || 'Failed to send OTP' };
+    if (!res.ok) {
+      return { success: false, error: res.data?.message || res.data?.error || 'Failed to send OTP' };
     }
 
     return {
       success: true,
-      message: data.message,
-      maskedEmail: data.maskedEmail,
-      previewUrl: data.previewUrl
+      message: res.data?.message,
+      maskedEmail: res.data?.maskedEmail,
+      previewUrl: res.data?.previewUrl
     };
   } catch (err: any) {
     const masked = email.replace(/(.{2})(.*)(?=@)/, '$1***');
@@ -325,29 +387,26 @@ export const nodeAuthSendOTP = async (email: string): Promise<NodeAuthResponse> 
 
 export const nodeAuthVerifyOTP = async (email: string, code: string): Promise<NodeAuthResponse> => {
   try {
-    const backendUrl = getBackendUrl();
-    // Canonical endpoint: POST /api/auth/verify-otp
-    const response = await fetch(`${backendUrl}/api/auth/verify-otp`, {
+    const res = await safeFetchWithFallback('/api/auth/verify-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ email, code })
     });
 
-    const data = await response.json();
-    if (!response.ok) {
-      return { success: false, error: data.message || data.error || 'OTP verification failed' };
+    if (!res.ok) {
+      return { success: false, error: res.data?.message || res.data?.error || 'OTP verification failed' };
     }
 
-    if (data.token) {
-      localStorage.setItem('jivexa_node_jwt_token', data.token);
+    if (res.data?.token) {
+      localStorage.setItem('jivexa_node_jwt_token', res.data.token);
     }
 
     return {
       success: true,
-      message: data.message,
-      token: data.token,
-      user: data.user
+      message: res.data?.message,
+      token: res.data?.token,
+      user: res.data?.user
     };
   } catch (err: any) {
     return {
@@ -359,30 +418,27 @@ export const nodeAuthVerifyOTP = async (email: string, code: string): Promise<No
 
 export const nodeAuthSubmitVerification = async (payload: Record<string, any>): Promise<NodeAuthResponse> => {
   try {
-    const backendUrl = getBackendUrl();
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    // Canonical endpoint: POST /api/auth/submit-verification
-    const response = await fetch(`${backendUrl}/api/auth/submit-verification`, {
+    const res = await safeFetchWithFallback('/api/auth/submit-verification', {
       method: 'POST',
       headers,
       credentials: 'include',
       body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
-    if (!response.ok) {
-      return { success: false, error: data.message || data.error || 'Verification submission failed' };
+    if (!res.ok) {
+      return { success: false, error: res.data?.message || res.data?.error || 'Verification submission failed' };
     }
 
     return {
       success: true,
-      message: data.message,
-      accountStatus: data.accountStatus
+      message: res.data?.message,
+      accountStatus: res.data?.accountStatus
     };
   } catch (err: any) {
     return {
@@ -394,7 +450,6 @@ export const nodeAuthSubmitVerification = async (payload: Record<string, any>): 
 
 export const nodeAuthUploadProfilePhoto = async (file: File): Promise<{ success: boolean; avatarUrl?: string; error?: string }> => {
   try {
-    const backendUrl = getBackendUrl();
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
@@ -408,7 +463,7 @@ export const nodeAuthUploadProfilePhoto = async (file: File): Promise<{ success:
       reader.readAsDataURL(file);
     });
 
-    const response = await fetch(`${backendUrl}/api/auth/profile-photo`, {
+    const res = await safeFetchWithFallback('/api/auth/profile-photo', {
       method: 'POST',
       headers,
       credentials: 'include',
@@ -418,14 +473,13 @@ export const nodeAuthUploadProfilePhoto = async (file: File): Promise<{ success:
       })
     });
 
-    const data = await response.json();
-    if (!response.ok || !data.success) {
-      return { success: false, error: data.error || data.message || 'Profile photo upload failed' };
+    if (!res.ok || !res.data?.success) {
+      return { success: false, error: res.data?.error || res.data?.message || 'Profile photo upload failed' };
     }
 
     return {
       success: true,
-      avatarUrl: data.avatarUrl
+      avatarUrl: res.data?.avatarUrl
     };
   } catch (err: any) {
     return {
@@ -437,22 +491,20 @@ export const nodeAuthUploadProfilePhoto = async (file: File): Promise<{ success:
 
 export const nodeAuthRemoveProfilePhoto = async (): Promise<{ success: boolean; error?: string }> => {
   try {
-    const backendUrl = getBackendUrl();
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${backendUrl}/api/auth/profile-photo`, {
+    const res = await safeFetchWithFallback('/api/auth/profile-photo', {
       method: 'DELETE',
       headers,
       credentials: 'include'
     });
 
-    const data = await response.json();
-    if (!response.ok || !data.success) {
-      return { success: false, error: data.error || data.message || 'Failed to remove profile photo' };
+    if (!res.ok || !res.data?.success) {
+      return { success: false, error: res.data?.error || res.data?.message || 'Failed to remove profile photo' };
     }
 
     return { success: true };
