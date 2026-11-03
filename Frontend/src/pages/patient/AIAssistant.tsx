@@ -364,28 +364,28 @@ export const AIAssistantChat: React.FC = () => {
       category: 'Diagnostics',
       subtext: 'Explain lab vitals, blood panels & clinical indicators',
       prompt: 'Can you help me understand a blood or lab test report? What are the key parameters, reference ranges, and abnormal indicators to look out for?',
-      icon: <FileText size={20} className="text-teal-600" />
+      icon: <FileText size={20} className="text-teal-600 card-svg-icon" />
     },
     {
       title: 'Assess Symptoms',
       category: 'Clinical Triage',
       subtext: 'Evaluate symptom patterns, severity & when to see a doctor',
       prompt: 'Can you explain common causes and red-flag warning signs when experiencing symptoms like persistent headache, fatigue, or fever?',
-      icon: <Activity size={20} className="text-emerald-600" />
+      icon: <Activity size={20} className="text-emerald-600 card-svg-icon" />
     },
     {
       title: 'Medication Safety & Usage',
       category: 'Pharmacology',
       subtext: 'Review dosage guidelines, precautions & drug interactions',
       prompt: 'What are the essential safety rules, common side effects, and precautions to verify when starting a newly prescribed medicine?',
-      icon: <Pill size={20} className="text-teal-600" />
+      icon: <Pill size={20} className="text-teal-600 card-svg-icon" />
     },
     {
       title: 'Doctor Consultation Prep',
       category: 'Care Navigation',
       subtext: 'Generate structured questions to ask your specialist',
       prompt: 'How can I prepare effectively for an upcoming physician consultation? What key questions and symptom timelines should I present?',
-      icon: <Stethoscope size={20} className="text-emerald-600" />
+      icon: <Stethoscope size={20} className="text-emerald-600 card-svg-icon" />
     }
   ];
 
@@ -440,13 +440,41 @@ export const AIAssistantChat: React.FC = () => {
       {/* MAIN TWO-COLUMN SPLIT CONTAINER */}
       <div className="jivexa-chat-split">
       
+        {/* Backdrop for mobile history sidebar */}
+        {isMobileSidebarOpen && (
+          <div 
+            className="sidebar-backdrop"
+            onClick={() => setIsMobileSidebarOpen(false)}
+            aria-label="Close conversation history"
+          />
+        )}
+
         {/* LEFT SIDEBAR: CONVERSATION ARCHIVE */}
         <aside className={`jivexa-sidebar ${isMobileSidebarOpen ? 'sidebar-mobile-open' : ''}`}>
           
+          {/* Mobile Sidebar Close Header */}
+          <div className="sidebar-mobile-header">
+            <div className="sidebar-mobile-title-wrap">
+              <MessageSquare size={16} />
+              <span className="sidebar-mobile-title">Chat History</span>
+            </div>
+            <button 
+              type="button" 
+              onClick={() => setIsMobileSidebarOpen(false)}
+              className="sidebar-close-btn"
+              aria-label="Close chat history"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
           {/* New Consultation Button */}
           <button 
             type="button"
-            onClick={() => startNewConversation()} 
+            onClick={() => {
+              startNewConversation();
+              setIsMobileSidebarOpen(false);
+            }} 
             className="new-chat-btn"
           >
             <Plus size={18} />
@@ -604,7 +632,7 @@ export const AIAssistantChat: React.FC = () => {
                 <div className="hero-emblem-wrapper">
                   <div className="hero-emblem-glow" />
                   <div className="hero-emblem">
-                    <HeartPulse size={34} />
+                    <HeartPulse size={34} className="hero-emblem-icon" />
                   </div>
                 </div>
 
@@ -621,7 +649,15 @@ export const AIAssistantChat: React.FC = () => {
                   {emptyStateSuggestions.map((item, idx) => (
                     <div
                       key={idx}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => handleSendMessage(item.prompt)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleSendMessage(item.prompt);
+                        }
+                      }}
                       className="suggestion-apple-card"
                     >
                       <div className="card-top-row">
@@ -2283,15 +2319,39 @@ export const AIAssistantChat: React.FC = () => {
           width: 100%;
         }
 
-        /* Responsive Mobile Breakpoint */
+        /* Mobile Drawer Header and Backdrop */
+        .sidebar-backdrop {
+          display: none;
+        }
+
+        .sidebar-mobile-header {
+          display: none;
+        }
+
+        .hero-emblem-icon {
+          width: 34px;
+          height: 34px;
+        }
+
+        .card-svg-icon {
+          width: 20px;
+          height: 20px;
+        }
+
+        /* Responsive Tablet Breakpoint (max-width: 860px) */
         @media (max-width: 860px) {
           .jivexa-ai-wrapper {
             height: auto;
             min-height: calc(100vh - 120px);
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
           }
 
           .jivexa-chat-split {
             grid-template-columns: 1fr;
+            gap: 12px;
           }
 
           .mobile-sidebar-toggle {
@@ -2304,6 +2364,7 @@ export const AIAssistantChat: React.FC = () => {
 
           .hero-suggestions-grid {
             grid-template-columns: 1fr;
+            gap: 12px;
           }
 
           .pro-plans-grid {
@@ -2322,6 +2383,15 @@ export const AIAssistantChat: React.FC = () => {
             max-width: 90%;
           }
 
+          .sidebar-backdrop {
+            display: block;
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            backdrop-filter: blur(2px);
+            z-index: 998;
+          }
+
           .jivexa-sidebar {
             display: none;
             position: fixed;
@@ -2331,12 +2401,511 @@ export const AIAssistantChat: React.FC = () => {
             max-width: 340px;
             height: 100vh;
             z-index: 999;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
             border-radius: 0 20px 20px 0;
+            background: #ffffff;
           }
 
           .jivexa-sidebar.sidebar-mobile-open {
             display: flex;
+          }
+
+          .sidebar-mobile-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #f1f5f9;
+          }
+
+          .sidebar-mobile-title-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #0f766e;
+          }
+
+          .sidebar-mobile-title {
+            font-size: 0.88rem;
+            font-weight: 750;
+            color: #0f172a;
+          }
+
+          .sidebar-close-btn {
+            background: transparent;
+            border: none;
+            color: #64748b;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+
+          .sidebar-close-btn:hover {
+            background: #f1f5f9;
+            color: #0f172a;
+          }
+        }
+
+        /* Dedicated Mobile Phone Breakpoint (max-width: 480px, optimizing 320px - 430px) */
+        @media (max-width: 480px) {
+          .jivexa-ai-wrapper {
+            gap: 10px;
+            min-height: 0;
+            overflow-x: hidden;
+            width: 100%;
+          }
+
+          /* 1. Header & Top Bar Optimization */
+          .jivexa-ai-topbar {
+            padding: 12px 14px;
+            border-radius: 14px;
+            gap: 8px;
+            box-shadow: 0 4px 14px -3px rgba(15, 118, 110, 0.25);
+          }
+
+          .topbar-branding {
+            gap: 10px;
+            min-width: 0;
+            flex: 1;
+          }
+
+          .avatar-orb {
+            width: 38px;
+            height: 38px;
+            min-width: 38px;
+            border-radius: 11px;
+          }
+
+          .avatar-icon {
+            width: 19px;
+            height: 19px;
+          }
+
+          .live-status-dot {
+            width: 9px;
+            height: 9px;
+            bottom: -1px;
+            right: -1px;
+          }
+
+          .topbar-titles {
+            gap: 2px;
+            min-width: 0;
+          }
+
+          .topbar-title-row {
+            gap: 6px;
+            align-items: center;
+          }
+
+          .topbar-title {
+            font-size: 1.05rem;
+            line-height: 1.22;
+          }
+
+          .clinical-pill {
+            font-size: 0.62rem;
+            padding: 2px 7px;
+            border-radius: 10px;
+            gap: 4px;
+            letter-spacing: 0.02em;
+          }
+
+          .pulse-beacon {
+            width: 5px;
+            height: 5px;
+          }
+
+          .topbar-subtitle {
+            font-size: 0.74rem;
+            line-height: 1.35;
+            color: rgba(255, 255, 255, 0.84);
+          }
+
+          .mobile-sidebar-toggle {
+            padding: 6px 10px;
+            border-radius: 10px;
+            font-size: 0.76rem;
+            min-height: 36px;
+            gap: 5px;
+          }
+
+          /* 2. Chat Workspace & Viewport Header */
+          .jivexa-chat-main {
+            border-radius: 16px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+            overflow-x: hidden;
+            width: 100%;
+          }
+
+          .chat-viewport-header {
+            padding: 8px 12px;
+            gap: 8px;
+          }
+
+          .viewport-avatar {
+            width: 30px;
+            height: 30px;
+            min-width: 30px;
+            border-radius: 8px;
+          }
+
+          .viewport-avatar svg {
+            width: 15px;
+            height: 15px;
+          }
+
+          .viewport-name {
+            font-size: 0.82rem;
+          }
+
+          .live-pill {
+            font-size: 0.60rem;
+            padding: 1px 5px;
+          }
+
+          .viewport-model-label {
+            font-size: 0.66rem;
+          }
+
+          .viewport-action-btn {
+            padding: 4px 8px;
+            font-size: 0.72rem;
+            border-radius: 8px;
+          }
+
+          /* 3. Messages Container */
+          .chat-messages-container {
+            padding: 10px 10px;
+            gap: 12px;
+            background: #ffffff;
+            overflow-x: hidden;
+            width: 100%;
+          }
+
+          /* 4. Clinical Advisory Banner */
+          .clinical-advisory-banner {
+            padding: 8px 10px;
+            border-radius: 10px;
+            gap: 8px;
+          }
+
+          .advisory-icon {
+            width: 15px;
+            height: 15px;
+            margin-top: 2px;
+          }
+
+          .advisory-content {
+            font-size: 0.70rem;
+            line-height: 1.38;
+          }
+
+          .advisory-title {
+            font-size: 0.70rem;
+          }
+
+          .advisory-text {
+            font-size: 0.68rem;
+          }
+
+          /* 5. Welcome & Empty Hero Section */
+          .chat-empty-hero {
+            padding: 6px 0 14px 0;
+            gap: 12px;
+            max-width: 100%;
+            width: 100%;
+          }
+
+          .hero-emblem-glow {
+            width: 44px;
+            height: 44px;
+            filter: blur(6px);
+          }
+
+          .hero-emblem {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 14px -2px rgba(15, 118, 110, 0.35);
+          }
+
+          .hero-emblem-icon {
+            width: 22px;
+            height: 22px;
+          }
+
+          .hero-headings {
+            gap: 3px;
+            padding: 0 2px;
+            width: 100%;
+          }
+
+          .hero-eyebrow {
+            font-size: 0.66rem;
+            font-weight: 750;
+            letter-spacing: 0.05em;
+          }
+
+          .hero-title {
+            font-size: 1.15rem;
+            font-weight: 800;
+            line-height: 1.3;
+            letter-spacing: -0.015em;
+          }
+
+          .hero-desc {
+            font-size: 0.78rem;
+            line-height: 1.42;
+            color: #64748b;
+            padding: 0 4px;
+          }
+
+          /* 6. Redesigned Feature Cards (Full Width, Consistent, High Readability) */
+          .hero-suggestions-grid {
+            grid-template-columns: 1fr;
+            gap: 10px;
+            width: 100%;
+          }
+
+          .suggestion-apple-card {
+            padding: 13px 14px;
+            border-radius: 14px;
+            gap: 8px;
+            border: 1px solid #e2e8f0;
+            background: #ffffff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03), 0 3px 10px rgba(15, 118, 110, 0.03);
+            width: 100%;
+            box-sizing: border-box;
+          }
+
+          .suggestion-apple-card:active {
+            background: #f8fafc;
+            border-color: #0f766e;
+            transform: scale(0.99);
+          }
+
+          .card-top-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+          }
+
+          .card-icon-bubble {
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            border-radius: 10px;
+          }
+
+          .card-svg-icon {
+            width: 18px;
+            height: 18px;
+          }
+
+          .card-category-badge {
+            font-size: 0.65rem;
+            padding: 2px 7px;
+            border-radius: 6px;
+            font-weight: 750;
+          }
+
+          .card-content {
+            gap: 2px;
+            width: 100%;
+            text-align: left;
+          }
+
+          .card-title {
+            font-size: 0.92rem;
+            font-weight: 750;
+            line-height: 1.3;
+            color: #0f172a;
+          }
+
+          .card-subtext {
+            font-size: 0.78rem;
+            line-height: 1.4;
+            color: #64748b;
+          }
+
+          .card-arrow-row {
+            padding-top: 6px;
+            min-height: 28px;
+            width: 100%;
+          }
+
+          .card-cta-label {
+            font-size: 0.74rem;
+            font-weight: 700;
+            color: #0f766e;
+          }
+
+          .card-arrow {
+            color: #0f766e;
+            width: 15px;
+            height: 15px;
+          }
+
+          /* 7. Quick Starter Chips */
+          .quick-starter-section {
+            padding: 4px 0 8px 0;
+            gap: 6px;
+            width: 100%;
+          }
+
+          .quick-starter-label {
+            font-size: 0.68rem;
+            font-weight: 750;
+          }
+
+          .quick-starter-chips {
+            gap: 6px;
+            justify-content: center;
+            width: 100%;
+          }
+
+          .quick-starter-chip {
+            padding: 5px 11px;
+            border-radius: 16px;
+            font-size: 0.73rem;
+            line-height: 1.3;
+          }
+
+          /* 8. Floating Composer on Mobile */
+          .chat-composer-wrapper {
+            padding: 8px 10px;
+            border-top: 1px solid #e2e8f0;
+            background: #ffffff;
+            width: 100%;
+            box-sizing: border-box;
+          }
+
+          .composer-input-pill {
+            padding: 3px 4px 3px 12px;
+            border-radius: 16px;
+            min-height: 40px;
+            border-width: 1px;
+          }
+
+          .composer-input-field {
+            font-size: 0.86rem;
+            padding: 5px 4px;
+            min-width: 0;
+          }
+
+          .composer-send-btn {
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+          }
+
+          .composer-security-footer {
+            font-size: 0.62rem;
+            line-height: 1.35;
+            padding: 2px 4px;
+          }
+
+          /* 9. Speech Bubbles on Mobile */
+          .message-bubble-container {
+            max-width: 95%;
+            gap: 8px;
+          }
+
+          .user-container {
+            max-width: 90%;
+          }
+
+          .message-avatar {
+            width: 28px;
+            height: 28px;
+            min-width: 28px;
+            border-radius: 8px;
+          }
+
+          .message-avatar svg {
+            width: 14px;
+            height: 14px;
+          }
+
+          .speech-bubble {
+            padding: 10px 14px;
+            border-radius: 14px;
+            gap: 4px;
+          }
+
+          .bubble-text-content {
+            font-size: 0.88rem;
+            line-height: 1.55;
+            word-break: break-word;
+          }
+
+          .followup-prompts-bar {
+            padding: 8px 10px;
+          }
+
+          .followup-chips-container {
+            gap: 6px;
+          }
+
+          .followup-prompt-chip {
+            font-size: 0.74rem;
+            padding: 5px 10px;
+            max-width: 100%;
+            white-space: normal;
+            text-align: left;
+          }
+        }
+
+        /* 10. Ultra-Narrow Devices (max-width: 360px, e.g. 320px - 360px) */
+        @media (max-width: 360px) {
+          .topbar-title {
+            font-size: 0.96rem;
+          }
+
+          .clinical-pill {
+            display: none;
+          }
+
+          .topbar-subtitle {
+            font-size: 0.68rem;
+            line-height: 1.3;
+          }
+
+          .hero-title {
+            font-size: 1.05rem;
+            line-height: 1.28;
+          }
+
+          .hero-desc {
+            font-size: 0.74rem;
+            line-height: 1.38;
+          }
+
+          .suggestion-apple-card {
+            padding: 11px 12px;
+          }
+
+          .card-title {
+            font-size: 0.88rem;
+          }
+
+          .card-subtext {
+            font-size: 0.74rem;
+          }
+
+          .chat-messages-container {
+            padding: 8px 8px;
+            gap: 10px;
+          }
+
+          .chat-composer-wrapper {
+            padding: 6px 8px;
           }
         }
       `}</style>
