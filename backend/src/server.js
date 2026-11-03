@@ -39,6 +39,15 @@ app.options('*', cors(corsOptions));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Handle JSON syntax parsing errors safely
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({ error: 'Malformed JSON payload', message: err.message });
+  }
+  next(err);
+});
+
 app.use(cookieParser());
 
 // Database connection guard middleware for auth endpoints
@@ -121,6 +130,18 @@ app.get('/', (req, res) => {
     service: 'JIVEXA Health OS Backend Service',
     database: 'MongoDB Atlas',
     timestamp: new Date().toISOString()
+  });
+});
+
+// Global catch-all Express error handler
+app.use((err, req, res, next) => {
+  console.warn('[Server] Express error caught safely:', err.message);
+  if (res.headersSent) {
+    return next(err);
+  }
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal Server Error'
   });
 });
 

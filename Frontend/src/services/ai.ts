@@ -479,67 +479,50 @@ export const streamAIHealthAssistant = async (
     };
   }
 
-  // 2. Check for JIVEXA Website Queries (0 Tokens Consumed, ALWAYS UNLIMITED)
-  if (isJivexaWebsiteQuery(query)) {
-    const websiteKnowledgeRes = getJivexaWebsiteKnowledgeResponse(query);
-    onChunk(websiteKnowledgeRes.text, 'JIVEXA Health AI Bot', false);
-    return websiteKnowledgeRes;
-  }
-
-  // 3. Strict Domain Guardrail: Non-Health Query Refusal
-  if (!isHealthOrMedicalQuery(query)) {
-    const refusalText = `Sorry, I am JIVEXA Health AI Bot. I am specialized exclusively in health, medicine, medical symptoms, prescription guidance, and JIVEXA platform navigation. I can only assist you with health and medical related issues.`;
-    onChunk(refusalText, 'JIVEXA Health AI Bot', false);
-    return {
-      text: refusalText,
-      isEmergency: false,
-      suggestions: ['Ask a health question', 'Ask about medicines', 'How to use JIVEXA'],
-      disclaimer: 'JIVEXA Health AI Bot Scope Notice.',
-      provider: 'JIVEXA Health AI Bot'
-    };
-  }
-
-  // 4. Check 6-Hour Rate Limit (1000 Tokens Limit) for Clinical Queries only (greetings & platform guide are free)
-  const isConversational = isConversationalQuery(query);
-  if (!isConversational) {
-    const rateLimit = checkHealthBotRateLimit(userId);
-    if (!rateLimit.allowed) {
-      const limitText = `⏳ Daily AI Health Token Limit Reached (1000/1000 Tokens - 100% Used)! You have reached your AI Health Bot token limit for this period. You can ask health and medical questions again after ${rateLimit.remainingHours} hours.
-
-💡 (Note: You can still ask any questions about the JIVEXA Health website and platform guide anytime!)`;
-      onChunk(limitText, 'JIVEXA Health AI Bot', false);
-      return {
-        text: limitText,
-        isEmergency: false,
-        suggestions: [],
-        disclaimer: '6-Hour Token Rate Limit Notice.',
-        provider: 'JIVEXA Health AI Bot',
-        limitReached: true
-      };
-    }
-    incrementHealthBotRateLimit(userId, 100);
-  }
-
-  // 5. Call Jivexa Backend Google Gemini SSE Streaming Endpoint
+  // 2. Call Jivexa Backend Google Gemini SSE Streaming Endpoint
   try {
-    const apiBase = getApiBaseUrl();
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
-    const response = await fetch(`${apiBase}/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-      },
-      credentials: 'include',
-      body: JSON.stringify({
-        message: query.trim(),
-        history: (history || [])
-          .filter(h => typeof h?.text === 'string' && h.text.trim().length > 0)
-          .map((h) => ({ sender: h.sender, text: h.text.trim() })),
-        userId,
-        conversationId
-      })
+    const requestBody = JSON.stringify({
+      message: query.trim(),
+      history: (history || [])
+        .filter(h => typeof h?.text === 'string' && h.text.trim().length > 0)
+        .map((h) => ({ sender: h.sender, text: h.text.trim() })),
+      userId,
+      conversationId
     });
+
+    const candidateBases = [
+      getApiBaseUrl(),
+      '/api/ai',
+      'http://127.0.0.1:4000/api/ai',
+      'https://jivexa-main.onrender.com/api/ai'
+    ];
+    const uniqueBases = Array.from(new Set(candidateBases.filter(Boolean)));
+
+    let response: Response | null = null;
+    let lastNetworkErr: any = null;
+
+    for (const base of uniqueBases) {
+      try {
+        const res = await fetch(`${base}/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          credentials: 'include',
+          body: requestBody
+        });
+        response = res;
+        break;
+      } catch (err) {
+        lastNetworkErr = err;
+      }
+    }
+
+    if (!response) {
+      throw lastNetworkErr || new Error('Network connection to JIVEXA AI failed');
+    }
 
     if (!response.ok) {
       let errorBody: any = null;

@@ -6,8 +6,8 @@
 // In-memory store for user token usage (backed by database sync)
 const userUsageStore = new Map();
 
-// Default free tier limit
-const FREE_TIER_TOKEN_LIMIT = 1000;
+// Default free tier limit (10,000 tokens per billing period matching User model schema)
+const FREE_TIER_TOKEN_LIMIT = 10000;
 
 /**
  * Get or initialize user usage record
@@ -23,7 +23,15 @@ const getUserUsage = (userId) => {
       requestHistory: []
     });
   }
-  return userUsageStore.get(id);
+  const usage = userUsageStore.get(id);
+
+  // Auto-reset if billing period has elapsed
+  if (usage.periodResetDate && new Date(usage.periodResetDate) < new Date()) {
+    usage.tokensUsedThisPeriod = 0;
+    usage.periodResetDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  return usage;
 };
 
 /**
@@ -35,11 +43,14 @@ const checkTokenLimit = (userId) => {
     return { allowed: true, usage };
   }
   
-  if (usage.tokensUsedThisPeriod >= FREE_TIER_TOKEN_LIMIT) {
+  // Anonymous / guest users get a flexible evaluation buffer (50,000 tokens)
+  const effectiveLimit = (!userId || userId === 'anonymous_user') ? 50000 : FREE_TIER_TOKEN_LIMIT;
+
+  if (usage.tokensUsedThisPeriod >= effectiveLimit) {
     return { 
       allowed: false, 
       reason: 'FREE_LIMIT_REACHED',
-      message: "You've reached your free 1,000 token limit — upgrade to JIVEXA Pro for unlimited access.",
+      message: `You've reached your free ${effectiveLimit.toLocaleString()} token limit — upgrade to JIVEXA Pro for unlimited access.`,
       usage 
     };
   }
@@ -52,12 +63,12 @@ const checkTokenLimit = (userId) => {
  */
 const recordTokenUsage = (userId, inputTokens, outputTokens) => {
   const usage = getUserUsage(userId);
-  const total = Math.max(1, inputTokens + outputTokens);
+  const total = Math.max(1, (inputTokens || 0) + (outputTokens || 0));
   usage.tokensUsedThisPeriod += total;
   usage.requestHistory.push({
     timestamp: new Date().toISOString(),
-    inputTokens,
-    outputTokens,
+    inputTokens: inputTokens || 0,
+    outputTokens: outputTokens || 0,
     total
   });
   return usage;
