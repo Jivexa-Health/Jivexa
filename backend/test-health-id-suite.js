@@ -60,9 +60,9 @@ const runTests = async () => {
     });
 
     // ----------------------------------------------------
-    // TEST 1: Lookup Exact Reported Issue ID (JXV-STVAZREWPAT-202608-F4A1B)
+    // TEST 1: Lookup Exact Reported Issue ID (JXV-STVAZREWPAT-202608-F4A1B & JXV-STVAZREW-202608-F4A1B)
     // ----------------------------------------------------
-    console.log('Test 1: Lookup Exact Reported ID (JXV-STVAZREWPAT-202608-F4A1B)...');
+    console.log('Test 1: Lookup Exact Reported ID (JXV-STVAZREWPAT-202608-F4A1B & JXV-STVAZREW-202608-F4A1B)...');
     {
       const res = await fetch(`${BASE_URL}/api/health-id/search?healthId=JXV-STVAZREWPAT-202608-F4A1B`);
       const body = await res.json();
@@ -74,6 +74,14 @@ const runTests = async () => {
       assert(body.patient.bloodGroup === 'B+', 'Blood group matches B+');
       assert(body.patient.healthProfile && Array.isArray(body.patient.healthProfile.allergies), 'Allergies array is populated');
       assert(body.patient.emergencyContact && body.patient.emergencyContact.phone === '+91 98111 22335', 'Emergency contact phone matches');
+
+      // Canonical Aarav ID (JXV-STVAZREW-202608-F4A1B)
+      const resAarav = await fetch(`${BASE_URL}/api/health-id/search?healthId=JXV-STVAZREW-202608-F4A1B`);
+      const bodyAarav = await resAarav.json();
+      assert(resAarav.status === 200, 'Aarav JXV-STVAZREW-202608-F4A1B status is 200 OK');
+      assert(bodyAarav.healthId === 'JXV-STVAZREW-202608-F4A1B', 'Aarav returns exact queried Health ID');
+      assert(bodyAarav.patient && bodyAarav.patient.name === 'Aarav Sharma', 'Aarav name matches');
+      assert(bodyAarav.patient.bloodGroup === 'B+', 'Aarav blood group is B+');
     }
 
     // ----------------------------------------------------

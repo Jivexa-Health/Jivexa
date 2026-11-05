@@ -10,7 +10,8 @@ const generateRandomId = () => {
 // Verified demo sample Health IDs from emergency lookup badge and card prototypes
 const DEMO_HEALTH_IDS = [
   {
-    healthId: 'JXV-STVAZREWPAT-202608-F4A1B',
+    healthId: 'JXV-STVAZREW-202608-F4A1B',
+    aliases: ['JXV-STVAZREW', 'JXV-STVAZREWPAT-202608-F4A1B', 'JXVSTVAZREW202608F4A1B'],
     fullName: 'Aarav Sharma',
     dateOfBirth: '1992-08-14',
     gender: 'Male',
@@ -21,32 +22,7 @@ const DEMO_HEALTH_IDS = [
       name: 'Sunita Sharma',
       relationship: 'Spouse',
       phone: '+91 98111 22335',
-      hospital: 'Apollo Hospital, Bangalore'
-    },
-    address: 'Koramangala, Bangalore',
-    healthProfile: {
-      chronicConditions: ['Hypertension (Managed)'],
-      allergies: ['Penicillin'],
-      currentMedications: ['Amlodipine 5mg'],
-      emergencyNotes: 'Carries emergency beta-blocker prescription in wallet.',
-      bloodPressure: '128/84 mmHg'
-    },
-    isDemo: true,
-    createdAt: '2026-01-15T10:30:00.000Z'
-  },
-  {
-    healthId: 'JXV-STVAZREW',
-    fullName: 'Aarav Sharma',
-    dateOfBirth: '1992-08-14',
-    gender: 'Male',
-    phoneNumber: '+91 98111 22334',
-    email: 'aarav.sharma@example.com',
-    bloodGroup: 'B+',
-    emergencyContact: {
-      name: 'Sunita Sharma',
-      relationship: 'Spouse',
-      phone: '+91 98111 22335',
-      hospital: 'Apollo Hospital, Bangalore'
+      hospital: 'Apollo Hospital, Bangalore (Simulated)'
     },
     address: 'Koramangala, Bangalore',
     healthProfile: {
@@ -61,6 +37,7 @@ const DEMO_HEALTH_IDS = [
   },
   {
     healthId: 'PAT-202608-F4A1B',
+    aliases: ['PAT202608F4A1B'],
     fullName: 'Meera Nair',
     dateOfBirth: '1998-11-22',
     gender: 'Female',
@@ -71,7 +48,7 @@ const DEMO_HEALTH_IDS = [
       name: 'Ramesh Nair',
       relationship: 'Father',
       phone: '+91 97444 55668',
-      hospital: 'Fortis Healthcare, Bannerghatta'
+      hospital: 'Fortis Healthcare, Bannerghatta (Simulated)'
     },
     address: 'Indiranagar, Bangalore',
     healthProfile: {
@@ -86,6 +63,7 @@ const DEMO_HEALTH_IDS = [
   },
   {
     healthId: 'JIV-2026-685853',
+    aliases: ['JIV2026685853'],
     fullName: 'Rajesh Varma',
     dateOfBirth: '1985-04-10',
     gender: 'Male',
@@ -96,7 +74,7 @@ const DEMO_HEALTH_IDS = [
       name: 'Pooja Varma',
       relationship: 'Spouse',
       phone: '+91 98222 33446',
-      hospital: 'Manipal Hospital, Old Airport Road'
+      hospital: 'Manipal Hospital, Old Airport Road (Simulated)'
     },
     address: 'Whitefield, Bangalore',
     healthProfile: {
@@ -130,9 +108,11 @@ const generateUniqueHealthId = async () => {
   return newHealthId;
 };
 
-// Idempotent Seeding of Demo Health IDs into MongoDB when connected
+// Safe, repeatable, development-only idempotent seeding of Demo Health IDs into MongoDB
+// Strict policy: Never insert fake patient records in production environments
 let demoSeeded = false;
 const seedDemoHealthIds = async () => {
+  if (process.env.NODE_ENV === 'production') return;
   if (demoSeeded || !isDatabaseConnected()) return;
   try {
     for (const demo of DEMO_HEALTH_IDS) {
@@ -153,6 +133,28 @@ const seedDemoHealthIds = async () => {
           isDemo: true
         }).catch(() => {});
       }
+
+      if (demo.aliases && Array.isArray(demo.aliases)) {
+        for (const alias of demo.aliases) {
+          const existingAlias = await MongoDb.healthIds.findOne({ healthId: alias });
+          if (!existingAlias) {
+            await MongoDb.healthIds.create({
+              healthId: alias,
+              userId: `demo-user-${alias.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+              fullName: demo.fullName,
+              dateOfBirth: demo.dateOfBirth,
+              gender: demo.gender,
+              bloodGroup: demo.bloodGroup,
+              email: demo.email || '',
+              phoneNumber: demo.phoneNumber || '',
+              emergencyContact: demo.emergencyContact || {},
+              address: demo.address || '',
+              healthProfile: demo.healthProfile || {},
+              isDemo: true
+            }).catch(() => {});
+          }
+        }
+      }
     }
     demoSeeded = true;
   } catch (err) {
@@ -161,8 +163,9 @@ const seedDemoHealthIds = async () => {
 };
 
 // Helper to format patient emergency profile response (Strictly sanitizes private credentials)
-const formatEmergencyPatientResponse = (record, isDemo = false) => {
+const formatEmergencyPatientResponse = (record, isDemo = false, requestedHealthId = null) => {
   const isDemoRecord = isDemo || Boolean(record.isDemo) || Boolean(record.isDemoRecord);
+  const resolvedHealthId = requestedHealthId || record.healthId;
 
   // Strictly sanitize emergency contact (only name, relationship, phone, hospital)
   let sanitizedEmergencyContact = null;
@@ -200,10 +203,11 @@ const formatEmergencyPatientResponse = (record, isDemo = false) => {
   return {
     success: true,
     isDemoRecord,
-    healthId: record.healthId,
+    healthId: resolvedHealthId,
     verificationStatus: isDemoRecord ? 'Sample Demo Record' : 'Verified Active Record',
     patient: {
       name: record.fullName || record.name || null,
+      isDemo: isDemoRecord,
       dateOfBirth: record.dateOfBirth || record.dob || null,
       gender: record.gender || null,
       bloodGroup: record.bloodGroup || null,
@@ -366,29 +370,56 @@ const searchHealthId = async (req, res) => {
     }
 
     // 1. Check verified demo sample Health IDs first (immediate response without DB dependency)
-    // Priority: Exact match first, alphanumeric exact match second, and substring match last
+    // Priority: Exact match first, alias match, alphanumeric match, and substring match
+    let matchedId = null;
     let demoMatch = DEMO_HEALTH_IDS.find((d) => {
-      const demoUpper = d.healthId.toUpperCase();
-      const demoAlpha = demoUpper.replace(/[^A-Z0-9]/g, '');
-      return demoUpper === sanitizedHealthId || demoAlpha === alphanumericId;
+      const primaryUpper = d.healthId.toUpperCase();
+      const primaryAlpha = primaryUpper.replace(/[^A-Z0-9]/g, '');
+      if (primaryUpper === sanitizedHealthId || primaryAlpha === alphanumericId) {
+        matchedId = sanitizedHealthId;
+        return true;
+      }
+      if (d.aliases && Array.isArray(d.aliases)) {
+        const aliasMatch = d.aliases.find(a => {
+          const aUpper = a.toUpperCase();
+          const aAlpha = aUpper.replace(/[^A-Z0-9]/g, '');
+          return aUpper === sanitizedHealthId || aAlpha === alphanumericId;
+        });
+        if (aliasMatch) {
+          matchedId = sanitizedHealthId;
+          return true;
+        }
+      }
+      return false;
     });
 
     if (!demoMatch && alphanumericId.length >= 8) {
       demoMatch = DEMO_HEALTH_IDS.find((d) => {
         const demoAlpha = d.healthId.toUpperCase().replace(/[^A-Z0-9]/g, '');
-        return demoAlpha.includes(alphanumericId) || alphanumericId.includes(demoAlpha);
+        if (demoAlpha.includes(alphanumericId) || alphanumericId.includes(demoAlpha)) {
+          matchedId = sanitizedHealthId;
+          return true;
+        }
+        if (d.aliases && Array.isArray(d.aliases)) {
+          const aMatch = d.aliases.find(a => {
+            const aAlpha = a.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            return aAlpha.includes(alphanumericId) || alphanumericId.includes(aAlpha);
+          });
+          if (aMatch) {
+            matchedId = sanitizedHealthId;
+            return true;
+          }
+        }
+        return false;
       });
     }
 
     if (demoMatch) {
-      // If the query was the full combined demo ID or alias, preserve the queried ID for display fidelity
       const returnRecord = {
         ...demoMatch,
-        healthId: demoMatch.healthId === 'JXV-STVAZREWPAT-202608-F4A1B' || sanitizedHealthId === 'JXV-STVAZREWPAT-202608-F4A1B'
-          ? sanitizedHealthId
-          : demoMatch.healthId
+        healthId: matchedId || sanitizedHealthId || demoMatch.healthId
       };
-      return res.status(200).json(formatEmergencyPatientResponse(returnRecord, true));
+      return res.status(200).json(formatEmergencyPatientResponse(returnRecord, true, matchedId || sanitizedHealthId));
     }
 
     let record = null;
