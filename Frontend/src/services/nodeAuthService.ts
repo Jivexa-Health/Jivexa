@@ -134,10 +134,26 @@ const safeFetchWithFallback = async (
     const res = await safeFetchJson(fullUrl, options);
     lastResult = { ...res, usedUrl: baseUrl };
 
-    // If server responded with an HTTP status code (even 4xx/5xx), network connection was established
-    if (res.status > 0) {
+    // If server responded with an application HTTP status code, network connection was established.
+    // 502 Bad Gateway and 504 Gateway Timeout indicate a proxy/gateway (e.g. Vite proxy, CDN)
+    // failed to reach the upstream backend, so fallback should continue to alternate endpoints.
+    const isProxyGatewayError = res.status === 502 || res.status === 504;
+    if (res.status > 0 && !isProxyGatewayError) {
       return lastResult;
     }
+  }
+
+  // If all candidate endpoints failed or returned proxy gateway errors, normalize to connection error
+  if (lastResult.status === 0 || lastResult.status === 502 || lastResult.status === 504) {
+    lastResult = {
+      ok: false,
+      status: lastResult.status || 0,
+      data: {
+        error: `Could not connect to authentication server (${getBackendUrl()}). Please ensure backend is running.`,
+        message: `Could not connect to authentication server (${getBackendUrl()}). Please ensure backend is running.`
+      },
+      usedUrl: getBackendUrl()
+    };
   }
 
   return lastResult;
@@ -203,10 +219,10 @@ export const nodeAuthSignup = async (
 
     if (!res.ok) {
       const errMsg = res.data?.message || res.data?.error || 'Registration failed on server.';
-      if (res.status === 0 || errMsg.toLowerCase().includes('failed to fetch')) {
+      if (res.status === 0 || res.status === 502 || res.status === 504 || errMsg.toLowerCase().includes('failed to fetch') || errMsg.includes('502')) {
         return {
           success: false,
-          error: `Could not connect to authentication server (${res.usedUrl || getBackendUrl()}). Network connection failed.`
+          error: `Could not connect to authentication server (${res.usedUrl || getBackendUrl()}). Please ensure backend is running.`
         };
       }
       return {
@@ -262,10 +278,10 @@ export const nodeAuthLogin = async (
 
     if (!res.ok) {
       const errMsg = res.data?.message || res.data?.error || 'Invalid credentials.';
-      if (res.status === 0 || errMsg.toLowerCase().includes('failed to fetch')) {
+      if (res.status === 0 || res.status === 502 || res.status === 504 || errMsg.toLowerCase().includes('failed to fetch') || errMsg.includes('502')) {
         return {
           success: false,
-          error: `Could not connect to authentication server (${res.usedUrl || getBackendUrl()}). Network connection failed.`
+          error: `Could not connect to authentication server (${res.usedUrl || getBackendUrl()}). Please ensure backend is running.`
         };
       }
       return {

@@ -299,8 +299,10 @@ const runTests = async () => {
       // Cleanup created users
       for (const email of createdEmails) {
         try {
-          await User.deleteOne({ email });
-          await HealthId.deleteOne({ email });
+          if (mongoose.connection.readyState === 1) {
+            await User.deleteOne({ email });
+            await HealthId.deleteOne({ email });
+          }
         } catch (_) {}
       }
       console.log(`🧹 Cleaned up ${createdEmails.length} test users from database.`);

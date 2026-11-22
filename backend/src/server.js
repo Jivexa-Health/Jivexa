@@ -199,7 +199,8 @@ const startServer = async () => {
       );
     };
 
-    const server = HOST ? app.listen(PORT, HOST, listenCallback) : app.listen(PORT, listenCallback);
+    const bindHost = HOST || '0.0.0.0';
+    const server = app.listen(PORT, bindHost, listenCallback);
 
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
