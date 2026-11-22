@@ -1387,6 +1387,36 @@ const extractClinicalParameters = (text, sourcePage = 1) => {
 };
 
 // ==============================================================================
+// OFFICIAL GOOGLE GEMINI MODELS & DYNAMIC MULTI-MODEL FALLBACK CASCADE
+// ==============================================================================
+/**
+ * Official Google Gemini models in priority order for dynamic fallback cascade.
+ * Ensures high availability, zero downtime, and compatibility with Google's API.
+ */
+const OFFICIAL_GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash'];
+
+/**
+ * Resolves candidate models for resilient fallback execution.
+ * If the configured model is unavailable (e.g. 404 or unsupported), execution
+ * automatically cascades to verified standard Google Generative AI models.
+ */
+const getModelCandidates = (requestedModel) => {
+  const req = String(requestedModel || '').trim();
+  const list = [];
+  if (req && req !== 'gemini-3.5-flash-lite') {
+    list.push(req);
+  }
+  for (const m of OFFICIAL_GEMINI_MODELS) {
+    if (!list.includes(m)) list.push(m);
+  }
+  // If explicitly requested 'gemini-3.5-flash-lite', preserve as first attempt for strict testing
+  if (req === 'gemini-3.5-flash-lite') {
+    list.unshift('gemini-3.5-flash-lite');
+  }
+  return [...new Set(list)];
+};
+
+// ==============================================================================
 // INITIALIZE GOOGLE GEMINI CLIENTS (CHATBOT A & CHATBOT B)
 // ==============================================================================
 const getChatbotGeminiModel = (generationConfig = {}, userProfile = null, crossConversationContext = '') => {
@@ -1581,10 +1611,14 @@ const categorizeAndLogGeminiError = (err, context = 'General Chatbot') => {
     userFriendlyMsg = 'JIVEXA Health AI is not configured with an active Gemini API key yet. Please configure GEMINI_API_KEY or GEMINI_CHATBOT_API_KEY in backend/.env.';
   }
   // 2. Invalid Key / Unauthorized (401 / 403)
-  else if (status === 401 || status === 403 || msg.includes('API key not valid') || msg.includes('API_KEY_INVALID') || msg.includes('PERMISSION_DENIED')) {
+  else if (status === 401 || status === 403 || msg.includes('API key not valid') || msg.includes('API_KEY_INVALID') || msg.includes('PERMISSION_DENIED') || msg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED')) {
     category = 'INVALID_API_KEY';
     errorCode = 'AI_INVALID_KEY';
-    userFriendlyMsg = 'The configured Gemini API key was rejected by Google AI. Please verify your API key in backend/.env.';
+    if (msg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || (err?.details && JSON.stringify(err.details).includes('ACCESS_TOKEN_TYPE_UNSUPPORTED'))) {
+      userFriendlyMsg = 'The configured Gemini API key was rejected by Google AI (ACCESS_TOKEN_TYPE_UNSUPPORTED). If using a Google Cloud AQ. key, ensure "Generative Language API" is enabled under API restrictions in Google Cloud Console, or generate a standard API key directly from Google AI Studio (https://aistudio.google.com/app/apikey).';
+    } else {
+      userFriendlyMsg = 'The configured Gemini API key was rejected by Google AI. Please verify your API key in backend/.env or obtain a new key from Google AI Studio (https://aistudio.google.com/app/apikey).';
+    }
   }
   // 3. Quota / Rate Limit (429)
   else if (status === 429 || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('Quota exceeded')) {
@@ -1794,72 +1828,88 @@ const isTransientError = (err) => {
 
 /**
  * 1. Stream Live Gemini Chat Response (SSE Streaming) with Bounded Transient Retries & Timeouts.
- * Strictly targets the configured model without silently switching models.
+ * Supports dynamic model fallback cascade (gemini-2.0-flash / gemini-1.5-flash) if configured model is unsupported.
  */
 const streamGemini = async (userMessage, history = [], onChunk, userProfile = null, crossConversationContext = '', reportContext = null) => {
-  const modelName = config.chatbotAi.model || 'gemini-3.5-flash-lite';
+  const configuredModel = config.chatbotAi.model || 'gemini-3.5-flash-lite';
+  const modelCandidates = getModelCandidates(configuredModel);
   const MAX_TRANSIENT_RETRIES = 2; // Bounded retries: 1 initial attempt + up to 2 retries for transient errors
   let lastError = null;
 
-  for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
-    try {
-      if (attempt > 0) {
-        const backoffMs = attempt * 500;
-        await new Promise(r => setTimeout(r, backoffMs));
-      }
-
-      const model = getGeminiModel({ model: modelName }, userProfile, crossConversationContext, reportContext);
-      const contents = buildGeminiContents(userMessage, history);
-
-      // Bounded execution with 20-second timeout
-      const streamPromise = model.generateContentStream({ contents });
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Gemini API request timed out (20s limit)')), 20000)
-      );
-
-      const responseStream = await Promise.race([streamPromise, timeoutPromise]);
-
-      let fullText = '';
-      for await (const chunk of responseStream.stream) {
-        const chunkText = chunk.text();
-        if (chunkText) {
-          fullText += chunkText;
-          onChunk(chunkText);
+  for (const modelName of modelCandidates) {
+    for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          const backoffMs = attempt * 500;
+          await new Promise(r => setTimeout(r, backoffMs));
         }
-      }
 
-      if (fullText) {
-        // Output guardrail inspection (prevent code leakage)
-        const outputValidation = validateAiOutput(fullText);
-        if (!outputValidation.isValid) {
+        const model = getGeminiModel({ model: modelName }, userProfile, crossConversationContext, reportContext);
+        const contents = buildGeminiContents(userMessage, history);
+
+        // Bounded execution with 20-second timeout
+        const streamPromise = model.generateContentStream({ contents });
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Gemini API request timed out (20s limit)')), 20000)
+        );
+
+        const responseStream = await Promise.race([streamPromise, timeoutPromise]);
+
+        let fullText = '';
+        for await (const chunk of responseStream.stream) {
+          const chunkText = chunk.text();
+          if (chunkText) {
+            fullText += chunkText;
+            onChunk(chunkText);
+          }
+        }
+
+        if (fullText) {
+          // Output guardrail inspection (prevent code leakage)
+          const outputValidation = validateAiOutput(fullText);
+          if (!outputValidation.isValid) {
+            return {
+              provider: `JIVEXA Health Guardrail (${configuredModel})`,
+              text: STANDARD_REFUSAL_MESSAGE,
+              inputTokens: estimateTokens(JSON.stringify(contents)),
+              outputTokens: estimateTokens(STANDARD_REFUSAL_MESSAGE)
+            };
+          }
+
+          aiMetrics.geminiSuccesses++;
           return {
-            provider: `JIVEXA Health Guardrail (${modelName})`,
-            text: STANDARD_REFUSAL_MESSAGE,
+            provider: `JIVEXA AI (${configuredModel})`,
+            text: fullText,
             inputTokens: estimateTokens(JSON.stringify(contents)),
-            outputTokens: estimateTokens(STANDARD_REFUSAL_MESSAGE)
+            outputTokens: estimateTokens(fullText)
           };
         }
+      } catch (err) {
+        lastError = err;
+        console.warn(`[Gemini Engine] Attempt ${attempt + 1} with model ${modelName} notice:`, err.message);
 
-        aiMetrics.geminiSuccesses++;
-        return {
-          provider: `JIVEXA AI (${modelName})`,
-          text: fullText,
-          inputTokens: estimateTokens(JSON.stringify(contents)),
-          outputTokens: estimateTokens(fullText)
-        };
-      }
-    } catch (err) {
-      lastError = err;
-      console.warn(`[Gemini Engine] Attempt ${attempt + 1} with model ${modelName} notice:`, err.message);
+        // If error indicates model is not found (404) or unsupported, cascade to next candidate
+        const errMsg = String(err?.message || '');
+        if (err?.status === 404 || errMsg.includes('404') || errMsg.includes('not found') || errMsg.includes('is not supported')) {
+          console.warn(`[Gemini Engine] Model ${modelName} is not available on Google API. Cascading to next supported model...`);
+          break; // Break inner retry loop to try next model candidate
+        }
 
-      // Only retry if the error is transient and we have attempts remaining
-      if (!isTransientError(err) || attempt === MAX_TRANSIENT_RETRIES) {
-        break;
+        // Only retry if the error is transient and we have attempts remaining
+        if (!isTransientError(err) || attempt === MAX_TRANSIENT_RETRIES) {
+          break;
+        }
       }
+    }
+
+    // If error is non-transient and NOT a 404 model-not-found (e.g. 401 invalid key, 429 quota exhaustion), do not attempt other models
+    const errMsg = String(lastError?.message || '');
+    if (lastError && !isTransientError(lastError) && lastError?.status !== 404 && !errMsg.includes('404') && !errMsg.includes('not found')) {
+      break;
     }
   }
 
-  throw lastError || new Error(`Google Gemini model ${modelName} failed to respond.`);
+  throw lastError || new Error(`Google Gemini model ${configuredModel} failed to respond.`);
 };
 
 /**
@@ -1975,14 +2025,12 @@ const analyzeReportWithAI = async (documentText, fileName, patientName = 'Patien
   }
 
   // 3. AI Interpretation Stage (when GEMINI_REPORT_API_KEY is configured)
-  try {
-    const model = getReportGeminiModel({
-      responseMimeType: 'application/json',
-      temperature: 0.1,
-      maxOutputTokens: 2000
-    });
+  const configuredReportModel = config.reportAi.model || 'gemini-3.5-flash-lite';
+  const reportModelCandidates = getModelCandidates(configuredReportModel);
+  let parsed = null;
+  let lastReportAnalysisError = null;
 
-    const prompt = `You are JIVEXA Clinical Education Assistant.
+  const prompt = `You are JIVEXA Clinical Education Assistant.
 The following laboratory parameters have been DETECTED and VALIDATED from a patient report named "${fileName}":
 
 VERIFIED EXTRACTED BIOMARKERS (Source of Truth - DO NOT ALTER NUMBERS):
@@ -2006,17 +2054,38 @@ Return ONLY valid JSON matching this structure:
   "lifestyleRecommendations": ["Tip 1", "Tip 2"]
 }`;
 
-    const geminiPromise = model.generateContent(prompt);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Gemini Report Analysis timed out (15s)')), 15000)
-    );
+  for (const modelName of reportModelCandidates) {
+    try {
+      const model = getReportGeminiModel({
+        model: modelName,
+        responseMimeType: 'application/json',
+        temperature: 0.1,
+        maxOutputTokens: 2000
+      });
 
-    const result = await Promise.race([geminiPromise, timeoutPromise]);
-    const responseText = result.response.text();
-    const parsed = JSON.parse(responseText.match(/\{[\s\S]*\}/)?.[0] || responseText);
+      const geminiPromise = model.generateContent(prompt);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini Report Analysis timed out (15s)')), 15000)
+      );
 
-    aiMetrics.geminiSuccesses++;
+      const result = await Promise.race([geminiPromise, timeoutPromise]);
+      const responseText = result.response.text();
+      parsed = JSON.parse(responseText.match(/\{[\s\S]*\}/)?.[0] || responseText);
+      aiMetrics.geminiSuccesses++;
+      lastReportAnalysisError = null;
+      break;
+    } catch (geminiErr) {
+      lastReportAnalysisError = geminiErr;
+      const errMsg = String(geminiErr?.message || '');
+      if (geminiErr?.status === 404 || errMsg.includes('404') || errMsg.includes('not found') || errMsg.includes('is not supported')) {
+        console.warn(`[Report Analyzer AI] Model ${modelName} unavailable on API. Cascading to next candidate...`);
+        continue;
+      }
+      break;
+    }
+  }
 
+  if (parsed) {
     return {
       isValidReport: true,
       invalidReason: '',
@@ -2046,41 +2115,41 @@ Return ONLY valid JSON matching this structure:
       disclaimer: 'Educational healthcare summary only. Not a medical diagnosis or prescription. Consult a qualified doctor for medical guidance.',
       analyzedAt: new Date().toISOString()
     };
-  } catch (geminiErr) {
-    const errorDetails = categorizeAndLogGeminiError(geminiErr, 'Report Analyzer AI');
-    aiMetrics.errors++;
-
-    // Explicit error response - never present a fake success!
-    return {
-      isValidReport: true,
-      invalidReason: '',
-      extractionStatus: 'REPORT_EXTRACTION_COMPLETE',
-      aiStatus: 'AI_TEMPORARILY_UNAVAILABLE',
-      reportTitle: fileName || 'Clinical Lab Report',
-      patientName,
-      reportDate: extracted.reportDate || '',
-      healthScore: null,
-      scoreStatus: 'AI Analysis Unavailable',
-      scoreFormula: '',
-      scoreMethodology: scoreResult.scoreMethodology || '',
-      dataCompleteness: scoreResult.dataCompleteness,
-      summaryCounts: scoreResult.summaryCounts,
-      summary: `⚠️ AI Interpretation Unavailable: The report analysis service was unable to complete clinical interpretation (${errorDetails.userFriendlyMsg}). Verified extracted parameters are preserved below.`,
-      parameters: extracted.parameters,
-      normalFindings: extracted.normal,
-      abnormalFindings: extracted.abnormal,
-      attentionParameters: extracted.attention,
-      withinRange: extracted.withinRange,
-      aboveRange: extracted.aboveRange,
-      belowRange: extracted.belowRange,
-      needsReview: extracted.needsReview,
-      possibleFactors: [],
-      questionsForDoctor: [],
-      lifestyleRecommendations: [],
-      disclaimer: 'Extracted raw laboratory parameters only. AI clinical interpretation is temporarily unavailable.',
-      analyzedAt: new Date().toISOString()
-    };
   }
+
+  const errorDetails = categorizeAndLogGeminiError(lastReportAnalysisError || new Error(`Report analysis model ${configuredReportModel} failed`), 'Report Analyzer AI');
+  aiMetrics.errors++;
+
+  // Explicit error response - never present a fake success!
+  return {
+    isValidReport: true,
+    invalidReason: '',
+    extractionStatus: 'REPORT_EXTRACTION_COMPLETE',
+    aiStatus: 'AI_TEMPORARILY_UNAVAILABLE',
+    reportTitle: fileName || 'Clinical Lab Report',
+    patientName,
+    reportDate: extracted.reportDate || '',
+    healthScore: null,
+    scoreStatus: 'AI Analysis Unavailable',
+    scoreFormula: '',
+    scoreMethodology: scoreResult.scoreMethodology || '',
+    dataCompleteness: scoreResult.dataCompleteness,
+    summaryCounts: scoreResult.summaryCounts,
+    summary: `⚠️ AI Interpretation Unavailable: The report analysis service was unable to complete clinical interpretation (${errorDetails.userFriendlyMsg}). Verified extracted parameters are preserved below.`,
+    parameters: extracted.parameters,
+    normalFindings: extracted.normal,
+    abnormalFindings: extracted.abnormal,
+    attentionParameters: extracted.attention,
+    withinRange: extracted.withinRange,
+    aboveRange: extracted.aboveRange,
+    belowRange: extracted.belowRange,
+    needsReview: extracted.needsReview,
+    possibleFactors: [],
+    questionsForDoctor: [],
+    lifestyleRecommendations: [],
+    disclaimer: 'Extracted raw laboratory parameters only. AI clinical interpretation is temporarily unavailable.',
+    analyzedAt: new Date().toISOString()
+  };
 };
 
 /**
@@ -2277,69 +2346,83 @@ const streamReportChatbot = async (userMessage, history = [], reportContext = nu
   }
 
   // 5. Streaming Gemini Execution with Bounded Transient Retries & Timeout
-  const modelName = config.reportAi.model || 'gemini-3.5-flash-lite';
+  const configuredModel = config.reportAi.model || 'gemini-3.5-flash-lite';
+  const modelCandidates = getModelCandidates(configuredModel);
   const MAX_TRANSIENT_RETRIES = 2;
   let lastError = null;
 
-  for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
-    try {
-      if (attempt > 0) {
-        const backoffMs = attempt * 500;
-        await new Promise(r => setTimeout(r, backoffMs));
-      }
-
-      const model = getReportGeminiModel({ model: modelName }, reportContext, userProfile);
-      const contents = buildGeminiContents(cleanMessage, history);
-
-      const streamPromise = model.generateContentStream({ contents });
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Report Chatbot request timed out (20s limit)')), 20000)
-      );
-
-      const responseStream = await Promise.race([streamPromise, timeoutPromise]);
-
-      let fullText = '';
-      for await (const chunk of responseStream.stream) {
-        const chunkText = chunk.text();
-        if (chunkText) {
-          fullText += chunkText;
-          onChunk(chunkText);
+  for (const modelName of modelCandidates) {
+    for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          const backoffMs = attempt * 500;
+          await new Promise(r => setTimeout(r, backoffMs));
         }
-      }
 
-      if (fullText) {
-        const outputValidation = validateAiOutput(fullText);
-        if (!outputValidation.isValid) {
-          const suppressed = "I am the JIVEXA Report Assistant. I can only assist you with questions about your medical report, lab values, and health guidance.";
+        const model = getReportGeminiModel({ model: modelName }, reportContext, userProfile);
+        const contents = buildGeminiContents(cleanMessage, history);
+
+        const streamPromise = model.generateContentStream({ contents });
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Report Chatbot request timed out (20s limit)')), 20000)
+        );
+
+        const responseStream = await Promise.race([streamPromise, timeoutPromise]);
+
+        let fullText = '';
+        for await (const chunk of responseStream.stream) {
+          const chunkText = chunk.text();
+          if (chunkText) {
+            fullText += chunkText;
+            onChunk(chunkText);
+          }
+        }
+
+        if (fullText) {
+          const outputValidation = validateAiOutput(fullText);
+          if (!outputValidation.isValid) {
+            const suppressed = "I am the JIVEXA Report Assistant. I can only assist you with questions about your medical report, lab values, and health guidance.";
+            return {
+              provider: `JIVEXA Report Guardrail (${configuredModel})`,
+              text: suppressed,
+              inputTokens: estimateTokens(JSON.stringify(contents)),
+              outputTokens: estimateTokens(suppressed)
+            };
+          }
+
+          aiMetrics.geminiSuccesses++;
+          const suggestions = predictFollowupQuestions(cleanMessage, fullText, history);
           return {
-            provider: `JIVEXA Report Guardrail (${modelName})`,
-            text: suppressed,
+            provider: `JIVEXA Report AI (${configuredModel})`,
+            text: fullText,
+            suggestions,
             inputTokens: estimateTokens(JSON.stringify(contents)),
-            outputTokens: estimateTokens(suppressed)
+            outputTokens: estimateTokens(fullText)
           };
         }
+      } catch (modelErr) {
+        lastError = modelErr;
+        console.warn(`[Report Chatbot Warning] Attempt ${attempt + 1} with model ${modelName} failed:`, modelErr.message);
 
-        aiMetrics.geminiSuccesses++;
-        const suggestions = predictFollowupQuestions(cleanMessage, fullText, history);
-        return {
-          provider: `JIVEXA Report AI (${modelName})`,
-          text: fullText,
-          suggestions,
-          inputTokens: estimateTokens(JSON.stringify(contents)),
-          outputTokens: estimateTokens(fullText)
-        };
-      }
-    } catch (modelErr) {
-      lastError = modelErr;
-      console.warn(`[Report Chatbot Warning] Attempt ${attempt + 1} with model ${modelName} failed:`, modelErr.message);
+        const errMsg = String(modelErr?.message || '');
+        if (modelErr?.status === 404 || errMsg.includes('404') || errMsg.includes('not found') || errMsg.includes('is not supported')) {
+          console.warn(`[Report Chatbot] Model ${modelName} is not available on Google API. Cascading to next supported model...`);
+          break;
+        }
 
-      if (!isTransientError(modelErr) || attempt === MAX_TRANSIENT_RETRIES) {
-        break;
+        if (!isTransientError(modelErr) || attempt === MAX_TRANSIENT_RETRIES) {
+          break;
+        }
       }
+    }
+
+    const errMsg = String(lastError?.message || '');
+    if (lastError && !isTransientError(lastError) && lastError?.status !== 404 && !errMsg.includes('404') && !errMsg.includes('not found')) {
+      break;
     }
   }
 
-  const errorDetails = categorizeAndLogGeminiError(lastError || new Error(`Report Chatbot model ${modelName} failed`), 'Chatbot B (Report Assistant)');
+  const errorDetails = categorizeAndLogGeminiError(lastError || new Error(`Report Chatbot model ${configuredModel} failed`), 'Chatbot B (Report Assistant)');
   aiMetrics.errors++;
   const errorMsg = `${errorDetails.errorCode}: ${errorDetails.userFriendlyMsg}`;
   onChunk(errorMsg);

@@ -145,7 +145,7 @@ const config = {
     console.log(`[JIVEXA CONFIG] Frontend Target  : ${this.server.frontendUrl}`);
     console.log(`[JIVEXA CONFIG] Loaded From      : ${this.loadedEnvFile || 'Process Environment (Cloud/Render)'}`);
     console.log(`[JIVEXA CONFIG] MongoDB Atlas    : ${this.db.isConfigured() ? `CONFIGURED (${this.db.getMaskedUri()})` : 'DEGRADED (MONGO_URI not set)'}`);
-    console.log(`[JIVEXA CONFIG] Gemini AI Engine : ${this.ai.isConfigured() ? `ACTIVE (Model: ${this.ai.geminiModel})` : 'UNCONFIGURED (Add GEMINI_API_KEY to backend/.env)'}`);
+    console.log(`[JIVEXA CONFIG] Gemini AI Engine : ${this.ai.isConfigured() ? `ACTIVE (Model: ${this.ai.geminiModel}${this.ai.geminiModel === 'gemini-3.5-flash-lite' ? ' -> auto-cascade: gemini-2.0-flash / gemini-1.5-flash' : ''})` : 'UNCONFIGURED (Add GEMINI_API_KEY to backend/.env)'}`);
     console.log(`[JIVEXA CONFIG] Auth JWT Secret  : ${this.auth.isDefaultJwtSecret ? 'WARNING: Default Fallback Key in use' : 'CONFIGURED (Custom Secret)'}`);
     console.log(`[JIVEXA CONFIG] Email / SMTP     : ${this.smtp.isConfigured() ? `ACTIVE (${this.smtp.host}:${this.smtp.port})` : 'CONSOLE_LOGS_ONLY'}`);
     console.log(`[JIVEXA CONFIG] Feature Flags    : OTP=${this.auth.otpEnabled} | PatientMVP=${this.auth.patientMvpOnly}`);
