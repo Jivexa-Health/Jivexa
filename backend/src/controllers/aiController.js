@@ -525,6 +525,17 @@ const saveMedicalReport = async (req, res) => {
       aiStatus: config.ai.isConfigured() ? 'AI_READY' : 'AI_NOT_CONFIGURED'
     };
 
+    if (docData._id) {
+      const existing = await MongoDb.medicalReports.findById(docData._id);
+      if (existing && existing.patientId && String(existing.patientId) !== patientId) {
+        return res.status(403).json({
+          success: false,
+          error: "Access denied: You cannot overwrite another patient's medical report.",
+          errorCode: 'REPORT_OVERWRITE_FORBIDDEN'
+        });
+      }
+    }
+
     const saved = await MongoDb.medicalReports.create(docData);
     return res.status(201).json({
       success: true,

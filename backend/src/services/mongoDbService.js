@@ -660,6 +660,9 @@ const MongoDb = {
       const payload = { ...data, _id: String(data._id || data.id || new mongoose.Types.ObjectId()), createdAt: new Date() };
       const idx = localStore.medicalReports.findIndex(m => String(m._id || m.id) === String(payload._id));
       if (idx >= 0) {
+        if (payload.patientId && localStore.medicalReports[idx].patientId && String(localStore.medicalReports[idx].patientId) !== String(payload.patientId)) {
+          throw new Error('Unauthorized report update');
+        }
         localStore.medicalReports[idx] = payload;
       } else {
         localStore.medicalReports.push(payload);
