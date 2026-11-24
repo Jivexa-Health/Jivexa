@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 
 const healthIdSchema = new mongoose.Schema(
   {
@@ -66,6 +67,11 @@ const healthIdSchema = new mongoose.Schema(
       currentMedications: [{ type: String }],
       bloodPressure: { type: String, default: '' },
       avatarUrl: { type: String, default: '' }
+    },
+    emergencyAccessToken: {
+      type: String,
+      default: () => 'emg_' + crypto.randomBytes(16).toString('hex'),
+      index: true
     }
   },
   {

@@ -34,7 +34,7 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const securityLogs = [
-    { time: '23:14:02', message: 'HIPAA Record encryption validation: PASSED', type: 'info' },
+    { time: '23:14:02', message: 'Database at-rest encryption validation: PASSED', type: 'info' },
     { time: '22:45:10', message: 'Digital signature authenticated for prescription pres_1', type: 'success' },
     { time: '20:10:45', message: 'Backup synchronization completed successfully', type: 'info' },
     { time: '18:30:12', message: 'API validation test for /api/health-records: code 200', type: 'info' }
@@ -98,7 +98,7 @@ export const AdminDashboard: React.FC = () => {
             <Shield size={20} />
           </div>
           <div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: 600 }}>HIPAA STATUS</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: 600 }}>DATA SECURITY</span>
             <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '2px', color: 'var(--secondary)' }}>COMPLIANT</h3>
           </div>
         </div>

@@ -238,7 +238,8 @@ const handleChatRequest = async (req, res) => {
         tokensUsed: updatedUsage.tokensUsedThisPeriod,
         subscriptionStatus: updatedUsage.subscriptionStatus,
         isEmergency: aiResult.isEmergency || false,
-        suggestions: aiResult.suggestions || []
+        suggestions: aiResult.suggestions || [],
+        structuredData: aiResult.structuredData || null
       })}\n\n`);
       res.end();
     }
@@ -311,6 +312,39 @@ const handleReportChatRequest = async (req, res) => {
     });
   }
 
+  // 3. Security Verification: If a report ID is provided, verify patient ownership or doctor sharing
+  const targetReportId = reportContext?.id || reportContext?.reportId;
+  if (targetReportId) {
+    if (!user) {
+      return res.status(401).json({
+        error: 'Authentication required: You must be logged in to consult on saved medical reports.',
+        errorCode: 'AUTH_REQUIRED'
+      });
+    }
+
+    try {
+      const dbReport = await MongoDb.medicalReports.findById(targetReportId);
+      if (!dbReport) {
+        return res.status(404).json({
+          error: 'Medical report not found or has been deleted from your vault.',
+          errorCode: 'REPORT_NOT_FOUND'
+        });
+      }
+
+      const isOwner = String(dbReport.patientId) === userId;
+      const isSharedDoctor = user.role === 'DOCTOR' && Array.isArray(dbReport.sharedWithDoctors) &&
+        dbReport.sharedWithDoctors.some(d => String(d.doctorId) === userId);
+      if (!isOwner && !isSharedDoctor) {
+        return res.status(403).json({
+          error: 'Access denied: You are not authorized to query this medical report.',
+          errorCode: 'REPORT_ACCESS_DENIED'
+        });
+      }
+    } catch (e) {
+      console.warn('[Report Chat Context Validation Warning]:', e.message);
+    }
+  }
+
   // Setup Server-Sent Events (SSE) streaming headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -347,7 +381,8 @@ const handleReportChatRequest = async (req, res) => {
         tokensUsed: updatedUsage.tokensUsedThisPeriod,
         subscriptionStatus: updatedUsage.subscriptionStatus,
         isEmergency: aiResult.isEmergency || false,
-        suggestions: aiResult.suggestions || []
+        suggestions: aiResult.suggestions || [],
+        structuredData: aiResult.structuredData || null
       })}\n\n`);
       res.end();
     }
@@ -490,14 +525,6 @@ const saveMedicalReport = async (req, res) => {
       aiStatus: config.ai.isConfigured() ? 'AI_READY' : 'AI_NOT_CONFIGURED'
     };
 
-    if (!isDatabaseConnected()) {
-      return res.status(200).json({
-        success: true,
-        message: 'Report cached in session (Database disconnected)',
-        report: docData
-      });
-    }
-
     const saved = await MongoDb.medicalReports.create(docData);
     return res.status(201).json({
       success: true,
@@ -506,6 +533,12 @@ const saveMedicalReport = async (req, res) => {
     });
   } catch (error) {
     console.error('[AI Controller Save Report Error]:', error);
+    if (error.message === 'Unauthorized report update') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied: You cannot overwrite another patient\'s medical report.'
+      });
+    }
     return res.status(500).json({ success: false, error: 'Failed to save medical report' });
   }
 };
@@ -517,10 +550,6 @@ const getMedicalReports = async (req, res) => {
   try {
     const userId = String(req.user._id || req.user.id);
     const role = req.user.role || 'PATIENT';
-
-    if (!isDatabaseConnected()) {
-      return res.json({ success: true, count: 0, reports: [] });
-    }
 
     let filter = {};
     if (role === 'DOCTOR') {
@@ -552,17 +581,13 @@ const getMedicalReportById = async (req, res) => {
     const userId = String(req.user._id || req.user.id);
     const role = req.user.role || 'PATIENT';
 
-    if (!isDatabaseConnected()) {
-      return res.status(503).json({ success: false, error: 'Database disconnected' });
-    }
-
     const report = await MongoDb.medicalReports.findById(id);
     if (!report) {
       return res.status(404).json({ success: false, error: 'Medical report not found' });
     }
 
     // Authorization: Patient owns it OR Doctor was explicitly shared it
-    const isOwner = report.patientId === userId;
+    const isOwner = String(report.patientId) === userId;
     const isSharedDoctor = role === 'DOCTOR' && Array.isArray(report.sharedWithDoctors) &&
       report.sharedWithDoctors.some(d => String(d.doctorId) === userId);
 
@@ -618,6 +643,47 @@ const shareMedicalReport = async (req, res) => {
   } catch (error) {
     console.error('[AI Controller Share Report Error]:', error);
     return res.status(500).json({ success: false, error: 'Failed to share medical report' });
+  }
+};
+
+/**
+ * Delete Medical Report by ID with Strict Patient Ownership Verification
+ */
+const deleteMedicalReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = String(req.user._id || req.user.id);
+
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'Report ID is required' });
+    }
+
+    const report = await MongoDb.medicalReports.findById(id);
+    if (!report) {
+      return res.status(404).json({ success: false, error: 'Medical report not found' });
+    }
+
+    // Security Verification: Only the owning patient can delete their report
+    if (String(report.patientId) !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied: You are not authorized to delete this medical report.'
+      });
+    }
+
+    const deleted = await MongoDb.medicalReports.deleteById(id, userId);
+    if (!deleted) {
+      return res.status(500).json({ success: false, error: 'Failed to delete medical report' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Medical report deleted successfully',
+      deletedReportId: id
+    });
+  } catch (error) {
+    console.error('[AI Controller Delete Report Error]:', error);
+    return res.status(500).json({ success: false, error: 'Failed to delete medical report' });
   }
 };
 
@@ -785,6 +851,7 @@ module.exports = {
   getMedicalReports,
   getMedicalReportById,
   shareMedicalReport,
+  deleteMedicalReport,
   getUserUsageStats,
   upgradeUserPro,
   getAdminAiMetrics,

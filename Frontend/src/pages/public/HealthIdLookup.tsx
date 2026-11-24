@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -22,6 +23,7 @@ interface PatientEmergencyProfile {
 }
 
 export const HealthIdLookup: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<PatientEmergencyProfile | null>(null);
@@ -35,10 +37,20 @@ export const HealthIdLookup: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleSearch = async (e?: React.FormEvent, sampleId?: string) => {
+  useEffect(() => {
+    const idFromUrl = searchParams.get('id') || searchParams.get('healthId') || searchParams.get('q');
+    const tokenFromUrl = searchParams.get('token') || undefined;
+    if (idFromUrl) {
+      setQuery(idFromUrl);
+      handleSearch(undefined, idFromUrl, tokenFromUrl);
+    }
+  }, [searchParams]);
+
+  const handleSearch = async (e?: React.FormEvent, sampleId?: string, tokenParam?: string) => {
     if (e) e.preventDefault();
     const rawTarget = sampleId || query;
     const searchQuery = rawTarget.trim().toUpperCase();
+    const activeToken = tokenParam || searchParams.get('token') || undefined;
 
     if (!searchQuery) {
       setError('Please enter a valid Health ID (e.g. JIV-2026-685853 or JXV-STVAZREW).');
@@ -50,7 +62,7 @@ export const HealthIdLookup: React.FC = () => {
     setLoading(true);
 
     try {
-      const res = await searchHealthIdApi(searchQuery);
+      const res = await searchHealthIdApi(searchQuery, activeToken);
       setLoading(false);
 
       if (res.success && res.patient) {
@@ -166,54 +178,43 @@ export const HealthIdLookup: React.FC = () => {
       {/* SIGNATURE EMERGENCY HEADER BANNER */}
       <div style={{
         width: '100%',
-        background: 'linear-gradient(135deg, #0284c7 0%, #0f766e 50%, #059669 100%)',
-        borderRadius: '24px',
-        padding: '36px 32px',
-        color: 'white',
-        boxShadow: '0 20px 40px -15px rgba(15, 118, 110, 0.35)',
+        backgroundColor: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '18px',
+        padding: '28px 32px',
+        boxShadow: '0 2px 8px -2px rgba(15, 23, 42, 0.05)',
         position: 'relative',
         overflow: 'hidden',
         boxSizing: 'border-box'
       }}>
-        {/* Ambient Glow */}
-        <div style={{
-          position: 'absolute',
-          top: '-30%',
-          right: '-10%',
-          width: '340px',
-          height: '340px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 70%)',
-          filter: 'blur(40px)',
-          pointerEvents: 'none'
-        }} />
+        {/* Subtle accent bar on the top edge */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #059669 0%, #0d9488 50%, #10b981 100%)' }} />
 
-        <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', gap: '12px', textAlign: 'center', alignItems: 'center' }}>
-          <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: 'rgba(255, 255, 255, 0.2)', backdropFilter: 'blur(10px)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.3)' }}>
-            <ShieldCheck size={36} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', textAlign: 'center', alignItems: 'center' }}>
+          <div style={{ width: '56px', height: '56px', borderRadius: '14px', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <ShieldCheck size={28} />
           </div>
 
           <span style={{
-            fontSize: '0.74rem',
+            fontSize: '0.72rem',
             fontWeight: 800,
-            letterSpacing: '0.08em',
+            letterSpacing: '0.06em',
             textTransform: 'uppercase',
-            backgroundColor: 'rgba(255, 255, 255, 0.2)',
-            color: '#ffffff',
-            padding: '4px 14px',
-            borderRadius: '12px',
-            backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(255, 255, 255, 0.25)'
+            backgroundColor: '#ecfdf5',
+            color: '#047857',
+            border: '1px solid #a7f3d0',
+            padding: '3px 12px',
+            borderRadius: '20px'
           }}>
             🚑 JIVEXA HEALTH OS • PUBLIC EMERGENCY VERIFICATION PORTAL
           </span>
 
-          <h1 style={{ fontSize: '2.2rem', fontWeight: 900, margin: 0, letterSpacing: '-0.02em', color: '#ffffff' }}>
+          <h1 style={{ fontSize: '1.6rem', fontWeight: 800, margin: 0, letterSpacing: '-0.02em', color: 'var(--text-main)' }}>
             Public Health ID Emergency Lookup
           </h1>
 
-          <p style={{ color: '#e0f2fe', fontSize: '0.96rem', margin: 0, maxWidth: '640px', lineHeight: '1.6' }}>
-            Instantly verify registered patient details, emergency blood group, critical allergies, and emergency kin contacts. Full clinical records remain encrypted and consent-protected.
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: 0, maxWidth: '640px', lineHeight: '1.5' }}>
+            Instantly verify registered patient details, emergency blood group, critical allergies, and emergency kin contacts. Full clinical records remain encrypted at rest and consent-protected.
           </p>
         </div>
       </div>
@@ -231,7 +232,7 @@ export const HealthIdLookup: React.FC = () => {
                   padding: '8px 16px',
                   borderRadius: '12px',
                   border: 'none',
-                  backgroundColor: activeSearchMode === 'id' ? '#0f766e' : 'var(--surface-raised)',
+                  backgroundColor: activeSearchMode === 'id' ? 'var(--primary)' : 'var(--surface-raised)',
                   color: activeSearchMode === 'id' ? 'white' : 'var(--text-muted)',
                   fontWeight: 800,
                   fontSize: '0.86rem',
@@ -253,7 +254,7 @@ export const HealthIdLookup: React.FC = () => {
                   padding: '8px 16px',
                   borderRadius: '12px',
                   border: 'none',
-                  backgroundColor: activeSearchMode === 'qr' ? '#0f766e' : 'var(--surface-raised)',
+                  backgroundColor: activeSearchMode === 'qr' ? 'var(--primary)' : 'var(--surface-raised)',
                   color: activeSearchMode === 'qr' ? 'white' : 'var(--text-muted)',
                   fontWeight: 800,
                   fontSize: '0.86rem',
@@ -299,7 +300,7 @@ export const HealthIdLookup: React.FC = () => {
                     Try Verified Sample Demo Health IDs (Click to verify):
                   </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#10b981', fontWeight: 800, fontSize: '0.82rem' }}>
-                    <ShieldCheck size={16} /> 256-Bit Encrypted Lookup
+                    <ShieldCheck size={16} /> TLS 1.3 Encrypted Lookup
                   </span>
                 </div>
 
@@ -691,7 +692,7 @@ export const HealthIdLookup: React.FC = () => {
               </div>
 
               <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)', margin: 0, lineHeight: '1.5' }}>
-                Under NDHM/ABDM medical data privacy compliance, full clinical history, diagnostic records, address, and credentials are protected with 256-bit encryption and hidden from public lookup:
+                Under standard clinical privacy guidelines, full diagnostic reports, prescriptions, address, and consultation history are protected with storage encryption and hidden from public lookup:
               </p>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', fontSize: '0.86rem', color: 'var(--text-muted)' }} className="grid-2-mobile">

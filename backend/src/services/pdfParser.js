@@ -31,6 +31,8 @@ const cleanPdfExtractedText = (text) => {
   cleaned = cleaned.replace(/\bT\s+est\b/gi, 'Test');
   cleaned = cleaned.replace(/\bT\s+otal\b/gi, 'Total');
   cleaned = cleaned.replace(/\bL\s+ymphocytes?\b/gi, 'Lymphocytes');
+  cleaned = cleaned.replace(/\bL\s+eukocytes?\b/gi, 'Leukocyte');
+  cleaned = cleaned.replace(/\bC\s+ount\b/gi, 'Count');
   cleaned = cleaned.replace(/\bV\s+olume\b/gi, 'Volume');
   cleaned = cleaned.replace(/\bW\s+idal\b/gi, 'Widal');
   cleaned = cleaned.replace(/\bC\s+orpuscular\b/gi, 'Corpuscular');
@@ -46,16 +48,9 @@ const cleanPdfExtractedText = (text) => {
   cleaned = cleaned.replace(/\bM\s+alaria\b/gi, 'Malaria');
   cleaned = cleaned.replace(/\bT\s+yphi\b/gi, 'Typhi');
 
-  // Fix spaced numbers like "1 3 . 9" -> "13.9"
+  // Fix spaced numbers like "1 3 . 9" -> "13.9" and "7 500" -> "7500"
   cleaned = cleaned.replace(/(\d)\s+(\.)\s+(\d)/g, '$1$2$3');
-  cleaned = cleaned.replace(/(\d)\s+(\d)/g, (match, d1, d2, offset, string) => {
-    // Only collapse if surrounded by clinical parameter labels or within numbers
-    const surrounding = string.substring(Math.max(0, offset - 15), Math.min(string.length, offset + 20));
-    if (/(?:TLC|Platelet|RBC|MCV|MCH|Hb|PCV|WBC|Result|Value|Range)/i.test(surrounding)) {
-      return `${d1}${d2}`;
-    }
-    return match;
-  });
+  cleaned = cleaned.replace(/(\d)\s+(\d)/g, '$1$2');
 
   return cleaned;
 };

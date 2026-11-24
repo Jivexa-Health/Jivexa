@@ -320,227 +320,240 @@ export const PatientDashboard: React.FC = () => {
   const displayRecords = userRecords.length > 0 ? userRecords.slice(0, 3) : sampleFallbackRecords;
   
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-      {/* BRAND HEADER BANNER */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {/* CLINICAL EXECUTIVE HERO BANNER */}
       <div style={{
-        background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 50%, #10b981 100%)',
-        borderRadius: '24px',
-        padding: '32px 36px',
-        color: 'white',
-        boxShadow: '0 12px 30px -8px rgba(15, 118, 110, 0.4)',
+        backgroundColor: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '18px',
+        padding: '28px 32px',
+        boxShadow: '0 2px 8px -2px rgba(15, 23, 42, 0.05)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         flexWrap: 'wrap',
-        gap: '20px'
+        gap: '24px',
+        position: 'relative',
+        overflow: 'hidden'
       }}>
+        {/* Subtle accent bar on the top edge */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #059669 0%, #0d9488 50%, #10b981 100%)' }} />
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <div style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '50%',
-            backgroundColor: 'rgba(255, 255, 255, 0.2)',
-            border: '2px solid rgba(255, 255, 255, 0.4)',
+            width: '56px',
+            height: '56px',
+            borderRadius: '14px',
+            backgroundColor: 'var(--primary-light)',
+            color: 'var(--primary)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'white',
-            backdropFilter: 'blur(10px)'
+            flexShrink: 0
           }}>
-            <Heart size={32} />
+            <Heart size={28} />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'white' }}>
-                Good morning, {user?.name ? user.name.split(' ')[0] : 'Piyush'}. 👋
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h1 style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--text-main)', margin: 0, letterSpacing: '-0.02em' }}>
+                Good morning, {user?.name ? user.name.split(' ')[0] : 'Patient'}.
               </h1>
-              <span style={{ backgroundColor: 'rgba(255, 255, 255, 0.25)', fontSize: '0.72rem', fontWeight: 700, padding: '2px 10px', borderRadius: '12px', color: 'white' }}>
+              <span style={{ 
+                backgroundColor: '#ecfdf5', 
+                border: '1px solid #a7f3d0',
+                fontSize: '0.72rem', 
+                fontWeight: 700, 
+                padding: '3px 10px', 
+                borderRadius: '20px', 
+                color: '#047857' 
+              }}>
                 {isPatientMvpOnly() ? 'Patient AI Health MVP' : 'Health OS Active'}
               </span>
             </div>
-            <p style={{ opacity: 0.9, fontSize: '0.88rem', marginTop: '4px' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '6px', marginBottom: '8px', lineHeight: '1.5' }}>
               {isPatientMvpOnly() 
-                ? 'Understand your health reports with AI, consult your JIVEXA Health AI Bot, and manage your health records.'
+                ? 'Understand diagnostic lab reports with clinical AI, consult your health assistant, and track verified biomarker trends.'
                 : 'Track clinical vitals, manage appointments, and consult your JIVEXA Health AI Bot.'}
             </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <button
                 onClick={detectLiveGPSLocation}
                 title="Click to refresh live GPS location"
                 style={{ 
-                  backgroundColor: 'rgba(255, 255, 255, 0.2)', 
-                  border: 'none',
-                  fontSize: '0.75rem', 
-                  fontWeight: 700, 
-                  padding: '4px 14px', 
-                  borderRadius: '12px', 
-                  color: '#ccfbf1', 
+                  backgroundColor: '#f8fafc', 
+                  border: '1px solid #e2e8f0',
+                  fontSize: '0.74rem', 
+                  fontWeight: 600, 
+                  padding: '4px 12px', 
+                  borderRadius: '20px', 
+                  color: 'var(--text-muted)', 
                   display: 'inline-flex', 
                   alignItems: 'center', 
                   gap: '6px', 
-                  backdropFilter: 'blur(6px)',
                   cursor: 'pointer' 
                 }}
               >
-                <MapPin size={13} style={{ color: '#5eead4' }} />
-                <span>{isLocating ? 'Detecting Live GPS Location...' : (userLocation?.address || 'Detecting Location...')}</span>
-                <RefreshCw size={12} className={isLocating ? 'spin' : ''} style={{ opacity: 0.8 }} />
+                <MapPin size={12} style={{ color: 'var(--primary)' }} />
+                <span>{isLocating ? 'Detecting Location...' : (userLocation?.address || 'Detecting Location...')}</span>
+                <RefreshCw size={11} className={isLocating ? 'spin' : ''} style={{ opacity: 0.7 }} />
               </button>
             </div>
           </div>
         </div>
 
         {isPatientMvpOnly() ? (
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <button 
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <Button 
               onClick={() => navigate('/patient/ai-report-analyzer')}
               style={{
-                backgroundColor: 'white',
-                color: '#0f766e',
-                border: 'none',
-                borderRadius: '14px',
-                padding: '12px 22px',
-                fontWeight: 800,
-                cursor: 'pointer',
+                borderRadius: '12px',
+                padding: '10px 20px',
+                fontWeight: 700,
+                fontSize: '0.88rem',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 4px 14px rgba(0,0,0,0.1)'
+                gap: '8px'
               }}
             >
-              <Sparkles size={18} style={{ color: '#0f766e' }} />
+              <Sparkles size={16} />
               Analyze Health Report
-            </button>
-            <button 
+            </Button>
+            <Button 
+              variant="outline"
               onClick={() => navigate('/patient/ai-assistant')}
               style={{
-                backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                color: 'white',
-                border: '1px solid rgba(255, 255, 255, 0.4)',
-                borderRadius: '14px',
-                padding: '12px 22px',
-                fontWeight: 800,
-                cursor: 'pointer',
+                borderRadius: '12px',
+                padding: '10px 20px',
+                fontWeight: 700,
+                fontSize: '0.88rem',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
-                backdropFilter: 'blur(8px)'
+                gap: '8px'
               }}
             >
-              <MessageSquare size={18} />
+              <MessageSquare size={16} />
               Talk to JIVEXA AI
-            </button>
+            </Button>
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <button 
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <Button 
               onClick={() => navigate('/patient/ambulance')}
               style={{
                 backgroundColor: '#dc2626',
-                color: 'white',
-                border: 'none',
-                borderRadius: '14px',
-                padding: '12px 20px',
-                fontWeight: 800,
-                cursor: 'pointer',
+                borderRadius: '12px',
+                padding: '10px 18px',
+                fontWeight: 700,
+                fontSize: '0.88rem',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 4px 14px rgba(220, 38, 38, 0.4)'
+                gap: '8px'
               }}
             >
-              <Siren size={18} />
-              Book Ambulance
-            </button>
-            <button 
+              <Siren size={16} />
+              Ambulance
+            </Button>
+            <Button 
               onClick={() => navigate('/patient/ai-report-analyzer')}
               style={{
-                backgroundColor: 'white',
-                color: '#0f766e',
-                border: 'none',
-                borderRadius: '14px',
-                padding: '12px 20px',
-                fontWeight: 800,
-                cursor: 'pointer',
+                borderRadius: '12px',
+                padding: '10px 18px',
+                fontWeight: 700,
+                fontSize: '0.88rem',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 4px 14px rgba(0,0,0,0.1)'
+                gap: '8px'
               }}
             >
-              <Sparkles size={18} />
+              <Sparkles size={16} />
               Analyze Lab Report
-            </button>
-            <button 
+            </Button>
+            <Button 
+              variant="outline"
               onClick={() => navigate('/patient/ai-assistant')}
               style={{
-                backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                color: 'white',
-                border: '1px solid rgba(255, 255, 255, 0.4)',
-                borderRadius: '14px',
-                padding: '12px 20px',
-                fontWeight: 800,
-                cursor: 'pointer',
+                borderRadius: '12px',
+                padding: '10px 18px',
+                fontWeight: 700,
+                fontSize: '0.88rem',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
-                backdropFilter: 'blur(8px)'
+                gap: '8px'
               }}
             >
-              <MessageSquare size={18} />
-              JIVEXA Health AI Bot
-            </button>
-            <button 
+              <MessageSquare size={16} />
+              JIVEXA Bot
+            </Button>
+            <Button 
+              variant="secondary"
               onClick={() => navigate('/patient/appointments')}
               style={{
-                backgroundColor: 'var(--primary)',
-                color: 'white',
-                border: 'none',
-                borderRadius: 'var(--radius-sm)',
+                borderRadius: '12px',
                 padding: '10px 18px',
-                fontWeight: 600,
-                cursor: 'pointer',
+                fontWeight: 700,
+                fontSize: '0.88rem',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px'
               }}
             >
               <Calendar size={16} />
-              Book Consultation
-            </button>
+              Appointments
+            </Button>
           </div>
         )}
       </div>
 
-      {/* JIVEXA HEALTH ID CARD */}
+      {/* JIVEXA HEALTH ID CLINICAL PASS */}
       <div style={{
-        background: 'linear-gradient(135deg, #0f766e 0%, #115e59 50%, #0d9488 100%)',
-        borderRadius: '24px',
-        padding: '24px 28px',
+        background: 'linear-gradient(135deg, #064e3b 0%, #065f46 60%, #047857 100%)',
+        borderRadius: '16px',
+        padding: '18px 24px',
         color: 'white',
-        boxShadow: '0 16px 32px -10px rgba(15, 118, 110, 0.35)',
+        boxShadow: '0 8px 22px -4px rgba(6, 78, 59, 0.28)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         flexWrap: 'wrap',
-        gap: '20px'
+        gap: '16px'
       }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-            <ShieldCheck size={18} style={{ color: '#5eead4' }} />
-            <span style={{ fontSize: '0.78rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#ccfbf1' }}>Permanent Health Identifier</span>
+            <ShieldCheck size={16} style={{ color: '#5eead4' }} />
+            <span style={{ fontSize: '0.70rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#ccfbf1', backgroundColor: 'rgba(255, 255, 255, 0.12)', padding: '2px 8px', borderRadius: '12px' }}>Permanent Health Identifier</span>
           </div>
-          <h3 style={{ fontSize: '1.75rem', fontWeight: 900, letterSpacing: '0.04em', fontFamily: 'monospace', color: '#ffffff', textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+          <h3 style={{ fontSize: '1.45rem', fontWeight: 900, letterSpacing: '0.04em', fontFamily: 'monospace', color: '#ffffff', margin: 0 }}>
             {patientProfile?.jivexaHealthId || 'JXV-STVAZREW'}
           </h3>
-          <span style={{ fontSize: '0.8rem', color: '#e6fffa', opacity: 0.9 }}>
+          <span style={{ fontSize: '0.8rem', color: '#e6fffa', opacity: 0.9, display: 'block', marginTop: '4px' }}>
             {isPatientMvpOnly() 
               ? 'Your unique digital Health Identifier for personal records and AI health tracking'
               : 'Share your JHID with doctors to grant secure consent-based access to your health summary'}
           </span>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => navigate('/patient/health-id')}
+            style={{
+              backgroundColor: 'white',
+              color: '#064e3b',
+              border: 'none',
+              borderRadius: '12px',
+              padding: '9px 16px',
+              fontSize: '0.82rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+            }}
+          >
+            <ShieldCheck size={15} />
+            View Digital Pass
+          </button>
+
           <button
             onClick={() => {
               const hid = patientProfile?.jivexaHealthId || 'JXV-STVAZREW';
@@ -548,11 +561,32 @@ export const PatientDashboard: React.FC = () => {
               setToastMsg(`JIVEXA Health ID (${hid}) copied to clipboard!`);
             }}
             style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.18)',
+              backgroundColor: 'rgba(255, 255, 255, 0.15)',
               color: 'white',
-              border: '1px solid rgba(255, 255, 255, 0.35)',
-              borderRadius: '14px',
-              padding: '10px 18px',
+              border: '1px solid rgba(255, 255, 255, 0.3)',
+              borderRadius: '12px',
+              padding: '9px 16px',
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'background-color 0.2s ease'
+            }}
+          >
+            <Copy size={15} />
+            Copy ID
+          </button>
+
+          <button
+            onClick={() => setIsQrModalOpen(true)}
+            style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.15)',
+              color: 'white',
+              border: '1px solid rgba(255, 255, 255, 0.3)',
+              borderRadius: '12px',
+              padding: '9px 16px',
               fontSize: '0.82rem',
               fontWeight: 700,
               cursor: 'pointer',
@@ -561,35 +595,14 @@ export const PatientDashboard: React.FC = () => {
               gap: '6px'
             }}
           >
-            <Copy size={16} />
-            Copy Health ID
-          </button>
-
-          <button
-            onClick={() => setIsQrModalOpen(true)}
-            style={{
-              backgroundColor: 'white',
-              color: '#0f766e',
-              border: 'none',
-              borderRadius: '14px',
-              padding: '10px 18px',
-              fontSize: '0.82rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-            }}
-          >
-            <QrCode size={16} />
+            <QrCode size={15} />
             QR Badge
           </button>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '32px' }} className="grid-2-mobile">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }} className="grid-2-mobile">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           
           {/* DOCTOR CONSENT, EMERGENCY MODE & AUDIT LOGS (PRESERVED FOR NON-MVP / ECOSYSTEM MODE) */}
           {!isPatientMvpOnly() && (
@@ -1036,34 +1049,82 @@ export const PatientDashboard: React.FC = () => {
               <div 
                 onClick={() => navigate('/patient/ai-report-analyzer')}
                 className="card card-hover" 
-                style={{ textAlign: 'center', padding: '20px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}
+                style={{ 
+                  textAlign: 'center', 
+                  padding: '22px 14px', 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center', 
+                  gap: '12px',
+                  borderRadius: '16px',
+                  border: '1px solid var(--border)'
+                }}
               >
-                <FileText size={22} style={{ color: 'var(--primary)' }} />
-                <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Analyze Report</span>
+                <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <FileText size={20} style={{ color: 'var(--primary)' }} />
+                </div>
+                <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-main)' }}>Analyze Report</span>
               </div>
               <div 
                 onClick={() => navigate('/patient/ai-assistant')}
                 className="card card-hover" 
-                style={{ textAlign: 'center', padding: '20px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}
+                style={{ 
+                  textAlign: 'center', 
+                  padding: '22px 14px', 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center', 
+                  gap: '12px',
+                  borderRadius: '16px',
+                  border: '1px solid var(--border)'
+                }}
               >
-                <MessageSquare size={22} style={{ color: 'var(--primary)' }} />
-                <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Talk to AI</span>
+                <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: 'var(--secondary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <MessageSquare size={20} style={{ color: 'var(--secondary)' }} />
+                </div>
+                <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-main)' }}>Talk to AI</span>
               </div>
               <div 
                 onClick={() => navigate('/patient/health-records')}
                 className="card card-hover" 
-                style={{ textAlign: 'center', padding: '20px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}
+                style={{ 
+                  textAlign: 'center', 
+                  padding: '22px 14px', 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center', 
+                  gap: '12px',
+                  borderRadius: '16px',
+                  border: '1px solid var(--border)'
+                }}
               >
-                <Clipboard size={22} style={{ color: 'var(--primary)' }} />
-                <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>View Records</span>
+                <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Clipboard size={20} style={{ color: '#2563eb' }} />
+                </div>
+                <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-main)' }}>View Records</span>
               </div>
               <div 
                 onClick={() => navigate('/patient/profile')}
                 className="card card-hover" 
-                style={{ textAlign: 'center', padding: '20px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}
+                style={{ 
+                  textAlign: 'center', 
+                  padding: '22px 14px', 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center', 
+                  gap: '12px',
+                  borderRadius: '16px',
+                  border: '1px solid var(--border)'
+                }}
               >
-                <UserCheck size={22} style={{ color: 'var(--primary)' }} />
-                <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>My Profile</span>
+                <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: '#fdf4ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <UserCheck size={20} style={{ color: '#9333ea' }} />
+                </div>
+                <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-main)' }}>My Profile</span>
               </div>
             </div>
           </div>
@@ -1203,7 +1264,8 @@ export const PatientDashboard: React.FC = () => {
       </Modal>
 
       <style>{`
-        @media (max-width: 768px) {
+        @media (max-width: 860px) {
+          .grid-2-mobile { grid-template-columns: 1fr !important; }
           .flex-col-mobile { flex-direction: column !important; align-items: flex-start !important; }
           .text-left-mobile { text-align: left !important; }
           .w-100-mobile { width: 100% !important; }

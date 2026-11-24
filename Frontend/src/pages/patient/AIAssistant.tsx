@@ -6,7 +6,8 @@ import {
   fetchBackendConversations,
   saveBackendConversation,
   deleteBackendConversation,
-  clearAllBackendConversations
+  clearAllBackendConversations,
+  StructuredMedicalData
 } from '../../services/ai';
 import { 
   MessageSquare, Plus, Search, Trash2, Send, 
@@ -25,6 +26,7 @@ interface ChatMessage {
   isStreaming?: boolean;
   suggestions?: string[];
   errorCode?: string;
+  structuredData?: StructuredMedicalData;
 }
 
 interface Conversation {
@@ -277,7 +279,8 @@ export const AIAssistantChat: React.FC = () => {
         isEmergency: isEmergencyFlag,
         isStreaming: false,
         suggestions: responseResult?.errorCode ? [] : (responseResult?.suggestions || []),
-        errorCode: responseResult?.errorCode
+        errorCode: responseResult?.errorCode,
+        structuredData: responseResult?.structuredData
       };
 
       setConversations((prev) => {
@@ -424,6 +427,17 @@ export const AIAssistantChat: React.FC = () => {
 
         {/* TOPBAR CONTROLS */}
         <div className="topbar-actions">
+          {/* Desktop New Chat Quick Shortcut */}
+          <button
+            type="button"
+            onClick={() => startNewConversation()}
+            className="topbar-new-chat-btn sr-mobile-hide"
+            title="Start new consultation"
+          >
+            <Plus size={15} />
+            <span>New Consultation</span>
+          </button>
+
           {/* Mobile History Toggle */}
           <button
             type="button"
@@ -431,8 +445,8 @@ export const AIAssistantChat: React.FC = () => {
             className="mobile-sidebar-toggle"
             aria-label="Toggle conversation history"
           >
-            {isMobileSidebarOpen ? <X size={18} /> : <MessageSquare size={18} />}
-            <span>Chats</span>
+            {isMobileSidebarOpen ? <X size={17} /> : <MessageSquare size={17} />}
+            <span>History</span>
           </button>
         </div>
       </header>
@@ -586,11 +600,15 @@ export const AIAssistantChat: React.FC = () => {
               </div>
               <div className="viewport-labels">
                 <div className="viewport-title-row">
-                  <span className="viewport-name">JIVEXA Clinical Assistant</span>
-                  <span className="live-pill">Live</span>
+                  <span className="viewport-name">
+                    {activeConv && activeConv.messages.length > 0
+                      ? (activeConv.title.length > 36 ? activeConv.title.slice(0, 36) + '...' : activeConv.title)
+                      : 'JIVEXA Clinical Assistant'}
+                  </span>
+                  <span className="live-pill">Clinical AI</span>
                 </div>
                 <span className="viewport-model-label">
-                  Google Gemini · Medical Intelligence Tier
+                  Google Gemini · Structured Medical Intelligence
                 </span>
               </div>
             </div>
@@ -615,11 +633,11 @@ export const AIAssistantChat: React.FC = () => {
             
             {/* COMPACT APPLE-STYLE CLINICAL DISCLAIMER */}
             <div className="clinical-advisory-banner">
-              <ShieldCheck size={18} className="advisory-icon" />
+              <ShieldCheck size={16} className="advisory-icon" />
               <div className="advisory-content">
-                <span className="advisory-title">Clinical Guidance Note:</span>
+                <span className="advisory-title">Clinical Advisory:</span>
                 <span className="advisory-text">
-                  JIVEXA Health AI offers educational healthcare information and symptom context. It does not provide medical diagnoses or replace professional consultations. In emergencies, immediately contact emergency services (112 / 108).
+                  JIVEXA Health AI provides supportive healthcare guidance. In urgent medical situations, call 112 or 108 immediately.
                 </span>
               </div>
             </div>
@@ -776,6 +794,163 @@ export const AIAssistantChat: React.FC = () => {
                               <span className="typing-dot dot-3" />
                               <span className="typing-text">Analyzing clinical data...</span>
                             </div>
+                          ) : !isUser && msg.structuredData && !msg.isStreaming ? (
+                            <div className="structured-medical-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                              {/* Urgency Badge */}
+                              {msg.structuredData.urgency_level && (
+                                <div 
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    padding: '4px 10px',
+                                    borderRadius: '9999px',
+                                    fontSize: '0.78rem',
+                                    fontWeight: 700,
+                                    letterSpacing: '0.01em',
+                                    alignSelf: 'flex-start',
+                                    backgroundColor: 
+                                      msg.structuredData.urgency_level === 'emergency' ? '#fef2f2' :
+                                      msg.structuredData.urgency_level === 'high_priority' ? '#fffbeb' :
+                                      msg.structuredData.urgency_level === 'self_care' ? '#f0fdf4' : '#eff6ff',
+                                    color: 
+                                      msg.structuredData.urgency_level === 'emergency' ? '#b91c1c' :
+                                      msg.structuredData.urgency_level === 'high_priority' ? '#b45309' :
+                                      msg.structuredData.urgency_level === 'self_care' ? '#15803d' : '#1d4ed8',
+                                    border: `1px solid ${
+                                      msg.structuredData.urgency_level === 'emergency' ? '#fecaca' :
+                                      msg.structuredData.urgency_level === 'high_priority' ? '#fde68a' :
+                                      msg.structuredData.urgency_level === 'self_care' ? '#bbf7d0' : '#bfdbfe'
+                                    }`
+                                  }}
+                                >
+                                  {msg.structuredData.urgency_level === 'emergency' && <AlertTriangle size={13} />}
+                                  {msg.structuredData.urgency_level === 'high_priority' && <AlertTriangle size={13} />}
+                                  {msg.structuredData.urgency_level === 'self_care' && <ShieldCheck size={13} />}
+                                  {msg.structuredData.urgency_level === 'routine' && <Info size={13} />}
+                                  {msg.structuredData.urgency_level === 'informational' && <FileText size={13} />}
+                                  <span>
+                                    {msg.structuredData.urgency_level === 'emergency' ? 'EMERGENCY: Immediate Medical Care Required' :
+                                     msg.structuredData.urgency_level === 'high_priority' ? 'HIGH PRIORITY: Clinical Review Within 12-24h' :
+                                     msg.structuredData.urgency_level === 'self_care' ? 'SELF CARE: Monitored Supportive Recovery' :
+                                     msg.structuredData.urgency_level === 'informational' ? 'INFORMATIONAL: Healthcare Education' :
+                                     'ROUTINE: Consult Healthcare Professional'}
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* Answer Summary */}
+                              {msg.structuredData.answer_summary && (
+                                <div style={{ fontSize: '0.90rem', lineHeight: '1.6', color: '#0f172a', fontWeight: 500 }}>
+                                  {msg.structuredData.answer_summary}
+                                </div>
+                              )}
+
+                              {/* Key Information */}
+                              {Array.isArray(msg.structuredData.key_information) && msg.structuredData.key_information.length > 0 && (
+                                <div style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 14px' }}>
+                                  <h5 style={{ margin: '0 0 6px 0', fontSize: '0.84rem', fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <Activity size={14} style={{ color: '#0284c7' }} /> Key Clinical Information
+                                  </h5>
+                                  <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    {msg.structuredData.key_information.map((item, idx) => (
+                                      <li key={idx} style={{ fontSize: '0.85rem', lineHeight: '1.5', color: '#334155' }}>
+                                        <MarkdownText content={item} />
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {/* Precautions */}
+                              {Array.isArray(msg.structuredData.precautions) && msg.structuredData.precautions.length > 0 && (
+                                <div style={{ backgroundColor: '#fffdf5', border: '1px solid #fef08a', borderRadius: '8px', padding: '10px 14px' }}>
+                                  <h5 style={{ margin: '0 0 6px 0', fontSize: '0.84rem', fontWeight: 700, color: '#854d0e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <ShieldCheck size={14} style={{ color: '#ca8a04' }} /> Important Precautions
+                                  </h5>
+                                  <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    {msg.structuredData.precautions.map((item, idx) => (
+                                      <li key={idx} style={{ fontSize: '0.84rem', lineHeight: '1.5', color: '#713f12' }}>
+                                        <MarkdownText content={item} />
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {/* Warning Signs */}
+                              {Array.isArray(msg.structuredData.warning_signs) && msg.structuredData.warning_signs.length > 0 && (
+                                <div style={{ backgroundColor: '#fff5f5', border: '1px solid #fecaca', borderRadius: '8px', padding: '10px 14px' }}>
+                                  <h5 style={{ margin: '0 0 6px 0', fontSize: '0.84rem', fontWeight: 700, color: '#991b1b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <AlertTriangle size={14} style={{ color: '#dc2626' }} /> Warning Signs (Seek Immediate Medical Care If)
+                                  </h5>
+                                  <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    {msg.structuredData.warning_signs.map((item, idx) => (
+                                      <li key={idx} style={{ fontSize: '0.84rem', lineHeight: '1.5', color: '#7f1d1d' }}>
+                                        <MarkdownText content={item} />
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {/* Recommended Next Steps */}
+                              {Array.isArray(msg.structuredData.recommended_next_steps) && msg.structuredData.recommended_next_steps.length > 0 && (
+                                <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '10px 14px' }}>
+                                  <h5 style={{ margin: '0 0 6px 0', fontSize: '0.84rem', fontWeight: 700, color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <Check size={14} style={{ color: '#16a34a' }} /> Recommended Next Steps
+                                  </h5>
+                                  <ol style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    {msg.structuredData.recommended_next_steps.map((item, idx) => (
+                                      <li key={idx} style={{ fontSize: '0.84rem', lineHeight: '1.5', color: '#14532d' }}>
+                                        <MarkdownText content={item} />
+                                      </li>
+                                    ))}
+                                  </ol>
+                                </div>
+                              )}
+
+                              {/* Medical Sources */}
+                              {Array.isArray(msg.structuredData.medical_sources) && msg.structuredData.medical_sources.length > 0 && (
+                                <div style={{ paddingTop: '6px', borderTop: '1px solid #f1f5f9' }}>
+                                  <span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                                    Verified Medical References:
+                                  </span>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                    {msg.structuredData.medical_sources.map((src, sIdx) => (
+                                      <a
+                                        key={sIdx}
+                                        href={src.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                          padding: '3px 8px',
+                                          borderRadius: '6px',
+                                          backgroundColor: '#f1f5f9',
+                                          color: '#0369a1',
+                                          fontSize: '0.78rem',
+                                          textDecoration: 'none',
+                                          fontWeight: 500,
+                                          border: '1px solid #e2e8f0'
+                                        }}
+                                        title={src.title}
+                                      >
+                                        <Check size={11} style={{ color: '#10b981' }} />
+                                        <span>{src.organization}: {src.title.length > 34 ? `${src.title.slice(0, 34)}...` : src.title}</span>
+                                      </a>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Disclaimer */}
+                              <div style={{ fontSize: '0.74rem', color: '#94a3b8', fontStyle: 'italic', lineHeight: '1.4' }}>
+                                Disclaimer: {msg.structuredData.disclaimer || 'JIVEXA Health AI is an educational assistant and does not provide formal diagnosis or treatment.'}
+                              </div>
+                            </div>
                           ) : (
                             <div className="bubble-text-content">
                               <MarkdownText content={msg.text} isUser={isUser} />
@@ -923,24 +1098,24 @@ export const AIAssistantChat: React.FC = () => {
         /* Root container */
         .jivexa-ai-wrapper {
           width: 100%;
-          max-width: 1320px;
+          max-width: 1360px;
           margin: 0 auto;
           display: flex;
           flex-direction: column;
-          gap: 16px;
-          height: calc(100vh - var(--header-height, 70px) - 32px);
-          min-height: 620px;
+          gap: 12px;
+          height: calc(100vh - var(--header-height, 62px) - 24px);
+          min-height: 580px;
           box-sizing: border-box;
           font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
 
         /* Top Bar */
         .jivexa-ai-topbar {
-          background: linear-gradient(135deg, #064e3b 0%, #0f766e 50%, #047857 100%);
-          border-radius: 20px;
-          padding: 16px 24px;
+          background: linear-gradient(135deg, #064e3b 0%, #0f766e 55%, #059669 100%);
+          border-radius: 16px;
+          padding: 12px 20px;
           color: white;
-          box-shadow: 0 10px 30px -8px rgba(15, 118, 110, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+          box-shadow: 0 6px 20px -4px rgba(15, 118, 110, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.15);
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -953,14 +1128,14 @@ export const AIAssistantChat: React.FC = () => {
         .topbar-branding {
           display: flex;
           align-items: center;
-          gap: 16px;
+          gap: 14px;
           z-index: 1;
         }
 
         .avatar-orb {
-          width: 46px;
-          height: 46px;
-          border-radius: 14px;
+          width: 40px;
+          height: 40px;
+          border-radius: 11px;
           background: rgba(255, 255, 255, 0.16);
           border: 1px solid rgba(255, 255, 255, 0.28);
           display: flex;
@@ -968,7 +1143,7 @@ export const AIAssistantChat: React.FC = () => {
           justify-content: center;
           position: relative;
           backdrop-filter: blur(12px);
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
         }
 
         .avatar-icon {
@@ -977,31 +1152,31 @@ export const AIAssistantChat: React.FC = () => {
 
         .live-status-dot {
           position: absolute;
-          bottom: -2px;
-          right: -2px;
-          width: 11px;
-          height: 11px;
+          bottom: -1px;
+          right: -1px;
+          width: 10px;
+          height: 10px;
           border-radius: 50%;
           background-color: #34d399;
           border: 2px solid #064e3b;
-          box-shadow: 0 0 8px #34d399;
+          box-shadow: 0 0 6px #34d399;
         }
 
         .topbar-titles {
           display: flex;
           flex-direction: column;
-          gap: 2px;
+          gap: 1px;
         }
 
         .topbar-title-row {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
           flex-wrap: wrap;
         }
 
         .topbar-title {
-          font-size: 1.25rem;
+          font-size: 1.15rem;
           font-weight: 800;
           color: #ffffff;
           margin: 0;
@@ -1011,20 +1186,20 @@ export const AIAssistantChat: React.FC = () => {
         .clinical-pill {
           display: inline-flex;
           align-items: center;
-          gap: 6px;
+          gap: 5px;
           background: rgba(255, 255, 255, 0.18);
           border: 1px solid rgba(255, 255, 255, 0.24);
-          padding: 3px 10px;
-          border-radius: 20px;
-          font-size: 0.72rem;
+          padding: 2px 8px;
+          border-radius: 16px;
+          font-size: 0.68rem;
           font-weight: 700;
           letter-spacing: 0.02em;
           text-transform: uppercase;
         }
 
         .pulse-beacon {
-          width: 6px;
-          height: 6px;
+          width: 5px;
+          height: 5px;
           border-radius: 50%;
           background-color: #34d399;
           animation: pulseBeacon 2s infinite ease-in-out;
@@ -1037,7 +1212,7 @@ export const AIAssistantChat: React.FC = () => {
 
         .topbar-subtitle {
           color: rgba(255, 255, 255, 0.88);
-          font-size: 0.82rem;
+          font-size: 0.78rem;
           margin: 0;
           font-weight: 450;
         }
@@ -1045,149 +1220,90 @@ export const AIAssistantChat: React.FC = () => {
         .topbar-actions {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 10px;
           z-index: 1;
         }
 
-        .token-capsule {
-          background: rgba(255, 255, 255, 0.14);
-          border: 1px solid rgba(255, 255, 255, 0.22);
-          border-radius: 14px;
-          padding: 6px 14px;
-          display: flex;
+        .topbar-new-chat-btn {
+          display: inline-flex;
           align-items: center;
-          gap: 10px;
+          gap: 6px;
+          background: rgba(255, 255, 255, 0.18);
+          border: 1px solid rgba(255, 255, 255, 0.32);
+          color: #ffffff;
+          font-size: 0.78rem;
+          font-weight: 700;
+          padding: 6px 13px;
+          border-radius: 10px;
           cursor: pointer;
           backdrop-filter: blur(10px);
           transition: all 0.2s ease;
         }
 
-        .token-capsule:hover {
-          background: rgba(255, 255, 255, 0.22);
-        }
-
-        .token-capsule-icon {
-          color: #a7f3d0;
-          display: flex;
-          align-items: center;
-        }
-
-        .token-capsule-text {
-          display: flex;
-          flex-direction: column;
-        }
-
-        .token-label {
-          font-size: 0.65rem;
-          color: rgba(255, 255, 255, 0.75);
-          text-transform: uppercase;
-          font-weight: 700;
-          letter-spacing: 0.04em;
-        }
-
-        .token-numbers {
-          font-size: 0.78rem;
-          font-weight: 800;
-          color: #ffffff;
-        }
-
-        .token-gauge-track {
-          width: 48px;
-          height: 5px;
-          background: rgba(255, 255, 255, 0.25);
-          border-radius: 3px;
-          overflow: hidden;
-        }
-
-        .token-gauge-fill {
-          height: 100%;
-          border-radius: 3px;
-          transition: width 0.3s ease;
-        }
-
-        .pro-upgrade-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 3px;
-          background: #fef3c7;
-          color: #92400e;
-          font-size: 0.68rem;
-          font-weight: 800;
-          padding: 2px 7px;
-          border-radius: 8px;
-          margin-left: 2px;
-        }
-
-        .security-capsule {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          background: rgba(255, 255, 255, 0.12);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          padding: 6px 12px;
-          border-radius: 12px;
-          font-size: 0.75rem;
-          font-weight: 600;
-          color: #ecfdf5;
+        .topbar-new-chat-btn:hover {
+          background: #ffffff;
+          color: #064e3b;
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
 
         .mobile-sidebar-toggle {
           display: none;
-          padding: 8px 14px;
-          border-radius: 12px;
+          padding: 6px 12px;
+          border-radius: 10px;
           border: 1px solid rgba(255, 255, 255, 0.3);
           background: rgba(255, 255, 255, 0.18);
           color: white;
           font-weight: 700;
-          font-size: 0.82rem;
+          font-size: 0.78rem;
           cursor: pointer;
           align-items: center;
-          gap: 6px;
+          gap: 5px;
         }
 
         /* Main Split */
         .jivexa-chat-split {
           display: grid;
-          grid-template-columns: 290px 1fr;
-          gap: 16px;
+          grid-template-columns: 280px 1fr;
+          gap: 14px;
           flex: 1;
           min-height: 0;
           position: relative;
         }
 
-        /* Left Sidebar */
+        /* Left Sidebar: Conversation Archive */
         .jivexa-sidebar {
           background: #ffffff;
           border: 1px solid #e2e8f0;
-          border-radius: 20px;
-          padding: 16px;
+          border-radius: 16px;
+          padding: 14px;
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 10px;
           overflow: hidden;
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.02);
+          box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
         }
 
         .new-chat-btn {
-          height: 44px;
-          background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
+          height: 40px;
+          background: linear-gradient(135deg, #059669 0%, #0d9488 100%);
           color: white;
           border: none;
-          border-radius: 14px;
-          font-size: 0.88rem;
+          border-radius: 10px;
+          font-size: 0.85rem;
           font-weight: 700;
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 8px;
           cursor: pointer;
-          box-shadow: 0 4px 14px -2px rgba(15, 118, 110, 0.35);
+          box-shadow: 0 3px 10px -2px rgba(5, 150, 105, 0.35);
           transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         .new-chat-btn:hover {
           transform: translateY(-1px);
-          box-shadow: 0 6px 18px -2px rgba(15, 118, 110, 0.45);
+          box-shadow: 0 6px 16px -2px rgba(5, 150, 105, 0.45);
         }
 
         .sidebar-search-box {
@@ -1198,32 +1314,33 @@ export const AIAssistantChat: React.FC = () => {
 
         .search-icon {
           position: absolute;
-          left: 12px;
+          left: 11px;
           color: #94a3b8;
           pointer-events: none;
         }
 
         .sidebar-search-input {
           width: 100%;
-          height: 38px;
+          height: 36px;
           background: #f8fafc;
           border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 0 32px 0 34px;
-          font-size: 0.82rem;
+          border-radius: 10px;
+          padding: 0 30px 0 32px;
+          font-size: 0.80rem;
           color: #0f172a;
           outline: none;
-          transition: border-color 0.2s, background-color 0.2s;
+          transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
         }
 
         .sidebar-search-input:focus {
-          border-color: #0f766e;
+          border-color: #059669;
           background: #ffffff;
+          box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12);
         }
 
         .search-clear-btn {
           position: absolute;
-          right: 10px;
+          right: 9px;
           background: transparent;
           border: none;
           color: #94a3b8;
@@ -1237,12 +1354,12 @@ export const AIAssistantChat: React.FC = () => {
           overflow-y: auto;
           display: flex;
           flex-direction: column;
-          gap: 6px;
-          padding-right: 4px;
+          gap: 4px;
+          padding-right: 2px;
         }
 
         .empty-history-state {
-          padding: 36px 12px;
+          padding: 28px 10px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -1251,38 +1368,38 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .empty-history-icon {
-          width: 44px;
-          height: 44px;
-          border-radius: 50%;
+          width: 40px;
+          height: 40px;
+          border-radius: 12px;
           background: #ecfdf5;
-          color: #0f766e;
+          color: #059669;
           display: flex;
           align-items: center;
           justify-content: center;
         }
 
         .empty-history-title {
-          font-size: 0.88rem;
-          font-weight: 800;
+          font-size: 0.86rem;
+          font-weight: 750;
           color: #1e293b;
           margin: 0;
         }
 
         .empty-history-desc {
-          font-size: 0.76rem;
+          font-size: 0.74rem;
           color: #64748b;
           line-height: 1.4;
           margin: 0;
         }
 
         .start-first-chat-btn {
-          margin-top: 8px;
-          padding: 6px 14px;
-          border-radius: 10px;
-          border: 1px solid #0f766e;
+          margin-top: 6px;
+          padding: 6px 13px;
+          border-radius: 8px;
+          border: 1px solid #059669;
           background: #ecfdf5;
-          color: #0f766e;
-          font-size: 0.78rem;
+          color: #059669;
+          font-size: 0.76rem;
           font-weight: 700;
           cursor: pointer;
           display: inline-flex;
@@ -1292,7 +1409,7 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .start-first-chat-btn:hover {
-          background: #0f766e;
+          background: #059669;
           color: white;
         }
 
@@ -1300,8 +1417,8 @@ export const AIAssistantChat: React.FC = () => {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 10px 12px;
-          border-radius: 12px;
+          padding: 9px 11px;
+          border-radius: 10px;
           background: transparent;
           border: 1px solid transparent;
           cursor: pointer;
@@ -1317,7 +1434,8 @@ export const AIAssistantChat: React.FC = () => {
         .sidebar-conv-card.active {
           background: #ecfdf5;
           border-color: #a7f3d0;
-          box-shadow: 0 2px 8px rgba(15, 118, 110, 0.08);
+          border-left: 3px solid #059669;
+          box-shadow: 0 1px 4px rgba(5, 150, 105, 0.08);
         }
 
         .conv-indicator {
@@ -1328,7 +1446,7 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .sidebar-conv-card.active .conv-indicator {
-          color: #0f766e;
+          color: #059669;
         }
 
         .conv-metadata {
@@ -1340,7 +1458,7 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .conv-title {
-          font-size: 0.82rem;
+          font-size: 0.81rem;
           font-weight: 600;
           color: #1e293b;
           white-space: nowrap;
@@ -1349,12 +1467,12 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .sidebar-conv-card.active .conv-title {
-          font-weight: 800;
-          color: #0f766e;
+          font-weight: 750;
+          color: #047857;
         }
 
         .conv-subinfo {
-          font-size: 0.68rem;
+          font-size: 0.67rem;
           color: #94a3b8;
         }
 
@@ -1363,13 +1481,13 @@ export const AIAssistantChat: React.FC = () => {
           border: none;
           color: #94a3b8;
           cursor: pointer;
-          padding: 4px;
+          padding: 3px;
           border-radius: 6px;
           opacity: 0;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: opacity 0.15s ease, color 0.15s ease;
+          transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
         }
 
         .sidebar-conv-card:hover .conv-delete-btn,
@@ -1385,7 +1503,7 @@ export const AIAssistantChat: React.FC = () => {
 
         .sidebar-footer {
           border-top: 1px solid #f1f5f9;
-          padding-top: 8px;
+          padding-top: 6px;
           display: flex;
           justify-content: center;
         }
@@ -1394,14 +1512,14 @@ export const AIAssistantChat: React.FC = () => {
           background: transparent;
           border: none;
           color: #94a3b8;
-          font-size: 0.75rem;
+          font-size: 0.73rem;
           font-weight: 600;
           cursor: pointer;
           display: flex;
           align-items: center;
-          gap: 6px;
-          padding: 4px 8px;
-          border-radius: 8px;
+          gap: 5px;
+          padding: 3px 6px;
+          border-radius: 6px;
           transition: color 0.15s ease;
         }
 
@@ -1413,17 +1531,17 @@ export const AIAssistantChat: React.FC = () => {
         .jivexa-chat-main {
           background: #ffffff;
           border: 1px solid #e2e8f0;
-          border-radius: 20px;
+          border-radius: 16px;
           display: flex;
           flex-direction: column;
           overflow: hidden;
           position: relative;
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.02);
+          box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
         }
 
         /* Active Chat Sub-Header */
         .chat-viewport-header {
-          padding: 12px 20px;
+          padding: 10px 18px;
           border-bottom: 1px solid #e2e8f0;
           background: #ffffff;
           display: flex;
@@ -1435,15 +1553,15 @@ export const AIAssistantChat: React.FC = () => {
         .viewport-status {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 10px;
         }
 
         .viewport-avatar {
-          width: 36px;
-          height: 36px;
-          border-radius: 10px;
+          width: 32px;
+          height: 32px;
+          border-radius: 9px;
           background: #ecfdf5;
-          color: #0f766e;
+          color: #059669;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -1463,25 +1581,25 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .viewport-name {
-          font-size: 0.92rem;
-          font-weight: 800;
+          font-size: 0.88rem;
+          font-weight: 750;
           color: #0f172a;
         }
 
         .live-pill {
-          font-size: 0.65rem;
-          font-weight: 800;
+          font-size: 0.63rem;
+          font-weight: 750;
           background: #ecfdf5;
           color: #059669;
           border: 1px solid #a7f3d0;
-          border-radius: 12px;
-          padding: 1px 7px;
+          border-radius: 10px;
+          padding: 1px 6px;
           text-transform: uppercase;
-          letter-spacing: 0.04em;
+          letter-spacing: 0.03em;
         }
 
         .viewport-model-label {
-          font-size: 0.72rem;
+          font-size: 0.70rem;
           color: #64748b;
         }
 
@@ -1494,14 +1612,14 @@ export const AIAssistantChat: React.FC = () => {
         .viewport-action-btn {
           display: inline-flex;
           align-items: center;
-          gap: 6px;
+          gap: 5px;
           background: #f8fafc;
           border: 1px solid #e2e8f0;
-          border-radius: 10px;
-          padding: 6px 12px;
-          font-size: 0.78rem;
+          border-radius: 8px;
+          padding: 5px 11px;
+          font-size: 0.76rem;
           font-weight: 700;
-          color: #0f766e;
+          color: #059669;
           cursor: pointer;
           transition: all 0.15s ease;
         }
@@ -1515,10 +1633,10 @@ export const AIAssistantChat: React.FC = () => {
         .chat-messages-container {
           flex: 1;
           overflow-y: auto;
-          padding: 18px 24px;
+          padding: 14px 18px;
           display: flex;
           flex-direction: column;
-          gap: 18px;
+          gap: 14px;
           background: #fcfdfd;
         }
 
@@ -1526,24 +1644,23 @@ export const AIAssistantChat: React.FC = () => {
         .clinical-advisory-banner {
           background: #f8fafc;
           border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 10px 14px;
+          border-radius: 10px;
+          padding: 8px 12px;
           display: flex;
-          align-items: flex-start;
-          gap: 10px;
+          align-items: center;
+          gap: 8px;
           flex-shrink: 0;
         }
 
         .advisory-icon {
-          color: #0f766e;
+          color: #059669;
           flex-shrink: 0;
-          margin-top: 1px;
         }
 
         .advisory-content {
-          font-size: 0.75rem;
+          font-size: 0.73rem;
           color: #64748b;
-          line-height: 1.45;
+          line-height: 1.4;
         }
 
         .advisory-title {
@@ -1560,9 +1677,9 @@ export const AIAssistantChat: React.FC = () => {
           align-items: center;
           justify-content: center;
           text-align: center;
-          padding: 24px 12px;
-          gap: 22px;
-          max-width: 760px;
+          padding: 16px 8px;
+          gap: 16px;
+          max-width: 680px;
           margin: 0 auto;
           width: 100%;
         }
@@ -1576,23 +1693,23 @@ export const AIAssistantChat: React.FC = () => {
 
         .hero-emblem-glow {
           position: absolute;
-          width: 80px;
-          height: 80px;
+          width: 70px;
+          height: 70px;
           border-radius: 50%;
-          background: radial-gradient(circle, rgba(16, 185, 129, 0.28) 0%, transparent 70%);
-          filter: blur(10px);
+          background: radial-gradient(circle, rgba(16, 185, 129, 0.25) 0%, transparent 70%);
+          filter: blur(8px);
         }
 
         .hero-emblem {
-          width: 60px;
-          height: 60px;
-          border-radius: 18px;
-          background: linear-gradient(135deg, #0f766e 0%, #10b981 100%);
+          width: 50px;
+          height: 50px;
+          border-radius: 15px;
+          background: linear-gradient(135deg, #059669 0%, #10b981 100%);
           color: white;
           display: flex;
           align-items: center;
           justify-content: center;
-          box-shadow: 0 10px 25px -4px rgba(15, 118, 110, 0.4);
+          box-shadow: 0 8px 20px -3px rgba(5, 150, 105, 0.38);
           position: relative;
           z-index: 1;
         }
@@ -1600,20 +1717,20 @@ export const AIAssistantChat: React.FC = () => {
         .hero-headings {
           display: flex;
           flex-direction: column;
-          gap: 6px;
+          gap: 4px;
           align-items: center;
         }
 
         .hero-eyebrow {
-          font-size: 0.75rem;
+          font-size: 0.72rem;
           font-weight: 800;
           text-transform: uppercase;
           letter-spacing: 0.08em;
-          color: #0f766e;
+          color: #059669;
         }
 
         .hero-title {
-          font-size: 1.45rem;
+          font-size: 1.35rem;
           font-weight: 800;
           color: #0f172a;
           margin: 0;
@@ -1621,39 +1738,39 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .hero-desc {
-          font-size: 0.86rem;
+          font-size: 0.83rem;
           color: #64748b;
           margin: 0;
-          max-width: 540px;
-          line-height: 1.5;
+          max-width: 520px;
+          line-height: 1.45;
         }
 
         /* 4 Suggestion Cards */
         .hero-suggestions-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 12px;
+          gap: 10px;
           width: 100%;
         }
 
         .suggestion-apple-card {
           background: #ffffff;
           border: 1px solid #e2e8f0;
-          border-radius: 16px;
-          padding: 16px;
+          border-radius: 14px;
+          padding: 14px;
           text-align: left;
           cursor: pointer;
           display: flex;
           flex-direction: column;
-          gap: 10px;
+          gap: 8px;
           transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+          box-shadow: 0 1px 3px rgba(15, 23, 42, 0.02);
         }
 
         .suggestion-apple-card:hover {
-          border-color: #0f766e;
+          border-color: #059669;
           transform: translateY(-2px);
-          box-shadow: 0 8px 20px -4px rgba(15, 118, 110, 0.15);
+          box-shadow: 0 6px 16px -3px rgba(5, 150, 105, 0.14);
           background: #fcfffd;
         }
 
@@ -1664,23 +1781,24 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .card-icon-bubble {
-          width: 38px;
-          height: 38px;
-          border-radius: 12px;
+          width: 34px;
+          height: 34px;
+          border-radius: 10px;
           background: #ecfdf5;
           display: flex;
           align-items: center;
           justify-content: center;
+          color: #059669;
         }
 
         .card-category-badge {
-          font-size: 0.68rem;
+          font-size: 0.65rem;
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.04em;
-          color: #0f766e;
+          color: #047857;
           background: #f0fdf4;
-          padding: 2px 8px;
+          padding: 2px 7px;
           border-radius: 6px;
           border: 1px solid #dcfce7;
         }
@@ -1688,18 +1806,18 @@ export const AIAssistantChat: React.FC = () => {
         .card-content {
           display: flex;
           flex-direction: column;
-          gap: 3px;
+          gap: 2px;
         }
 
         .card-title {
-          font-size: 0.88rem;
-          font-weight: 800;
+          font-size: 0.86rem;
+          font-weight: 750;
           color: #0f172a;
           margin: 0;
         }
 
         .card-subtext {
-          font-size: 0.74rem;
+          font-size: 0.73rem;
           color: #64748b;
           margin: 0;
           line-height: 1.35;
@@ -1709,14 +1827,14 @@ export const AIAssistantChat: React.FC = () => {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding-top: 4px;
+          padding-top: 3px;
           border-top: 1px solid #f1f5f9;
         }
 
         .card-cta-label {
-          font-size: 0.72rem;
+          font-size: 0.70rem;
           font-weight: 700;
-          color: #0f766e;
+          color: #059669;
         }
 
         .card-arrow {
@@ -1725,7 +1843,7 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .suggestion-apple-card:hover .card-arrow {
-          color: #0f766e;
+          color: #059669;
           transform: translateX(3px);
         }
 
@@ -1734,13 +1852,13 @@ export const AIAssistantChat: React.FC = () => {
           width: 100%;
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 6px;
           align-items: center;
         }
 
         .quick-starter-label {
-          font-size: 0.72rem;
-          font-weight: 800;
+          font-size: 0.68rem;
+          font-weight: 750;
           text-transform: uppercase;
           letter-spacing: 0.06em;
           color: #94a3b8;
@@ -1749,16 +1867,16 @@ export const AIAssistantChat: React.FC = () => {
         .quick-starter-chips {
           display: flex;
           flex-wrap: wrap;
-          gap: 8px;
+          gap: 6px;
           justify-content: center;
         }
 
         .quick-starter-chip {
-          padding: 6px 14px;
-          border-radius: 20px;
+          padding: 5px 12px;
+          border-radius: 16px;
           background: #f8fafc;
           border: 1px solid #e2e8f0;
-          font-size: 0.76rem;
+          font-size: 0.74rem;
           font-weight: 600;
           color: #334155;
           cursor: pointer;
@@ -1768,7 +1886,7 @@ export const AIAssistantChat: React.FC = () => {
         .quick-starter-chip:hover {
           background: #ecfdf5;
           border-color: #a7f3d0;
-          color: #0f766e;
+          color: #047857;
           transform: translateY(-1px);
         }
 
@@ -1776,18 +1894,18 @@ export const AIAssistantChat: React.FC = () => {
         .messages-stream {
           display: flex;
           flex-direction: column;
-          gap: 18px;
+          gap: 14px;
           width: 100%;
         }
 
         .message-row {
           display: flex;
           width: 100%;
-          animation: appleBubbleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+          animation: appleBubbleIn 0.20s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         @keyframes appleBubbleIn {
-          from { opacity: 0; transform: translateY(6px); }
+          from { opacity: 0; transform: translateY(5px); }
           to { opacity: 1; transform: translateY(0); }
         }
 
@@ -1802,7 +1920,7 @@ export const AIAssistantChat: React.FC = () => {
         .message-bubble-container {
           display: flex;
           align-items: flex-start;
-          gap: 10px;
+          gap: 9px;
           max-width: 82%;
         }
 
@@ -1812,9 +1930,9 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .message-avatar {
-          width: 34px;
-          height: 34px;
-          border-radius: 12px;
+          width: 32px;
+          height: 32px;
+          border-radius: 10px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -1824,37 +1942,37 @@ export const AIAssistantChat: React.FC = () => {
 
         .user-avatar {
           background: #f1f5f9;
-          color: #0f766e;
+          color: #059669;
           border: 1px solid #e2e8f0;
         }
 
         .ai-avatar {
-          background: linear-gradient(135deg, #0f766e 0%, #10b981 100%);
+          background: linear-gradient(135deg, #059669 0%, #10b981 100%);
           color: white;
-          box-shadow: 0 4px 12px -2px rgba(15, 118, 110, 0.3);
+          box-shadow: 0 2px 8px -1px rgba(5, 150, 105, 0.3);
         }
 
         .speech-bubble {
-          padding: 14px 18px;
+          padding: 12px 16px;
           position: relative;
           display: flex;
           flex-direction: column;
-          gap: 6px;
+          gap: 5px;
         }
 
         .user-bubble {
-          background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
+          background: linear-gradient(135deg, #059669 0%, #047857 100%);
           color: #ffffff;
-          border-radius: 18px 18px 4px 18px;
-          box-shadow: 0 4px 14px -2px rgba(15, 118, 110, 0.25);
+          border-radius: 16px 16px 4px 16px;
+          box-shadow: 0 3px 10px -2px rgba(5, 150, 105, 0.25);
         }
 
         .ai-bubble {
           background: #ffffff;
           color: #0f172a;
           border: 1px solid #e2e8f0;
-          border-radius: 18px 18px 18px 4px;
-          box-shadow: 0 3px 12px rgba(0, 0, 0, 0.03);
+          border-radius: 16px 16px 16px 4px;
+          box-shadow: 0 2px 6px rgba(15, 23, 42, 0.03);
         }
 
         .emergency-bubble {
@@ -1866,9 +1984,9 @@ export const AIAssistantChat: React.FC = () => {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding-bottom: 6px;
+          padding-bottom: 5px;
           border-bottom: 1px solid #f1f5f9;
-          margin-bottom: 4px;
+          margin-bottom: 3px;
         }
 
         .ai-meta-identity {
@@ -1879,16 +1997,16 @@ export const AIAssistantChat: React.FC = () => {
 
         .ai-meta-name {
           font-size: 0.74rem;
-          font-weight: 800;
-          color: #0f766e;
+          font-weight: 750;
+          color: #059669;
         }
 
         .ai-meta-model {
-          font-size: 0.65rem;
+          font-size: 0.64rem;
           color: #64748b;
           background: #f1f5f9;
           padding: 2px 6px;
-          border-radius: 6px;
+          border-radius: 5px;
           font-weight: 600;
         }
 
@@ -1896,19 +2014,19 @@ export const AIAssistantChat: React.FC = () => {
           background: transparent;
           border: none;
           color: #94a3b8;
-          font-size: 0.7rem;
+          font-size: 0.69rem;
           font-weight: 600;
           cursor: pointer;
           display: flex;
           align-items: center;
           gap: 4px;
-          padding: 2px 6px;
-          border-radius: 6px;
+          padding: 2px 5px;
+          border-radius: 5px;
           transition: all 0.15s ease;
         }
 
         .copy-bubble-btn:hover {
-          color: #0f766e;
+          color: #059669;
           background: #f1f5f9;
         }
 
@@ -1916,12 +2034,12 @@ export const AIAssistantChat: React.FC = () => {
         .emergency-alert-card {
           background: #fef2f2;
           border: 1px solid #fecaca;
-          border-radius: 12px;
-          padding: 10px 14px;
+          border-radius: 10px;
+          padding: 9px 12px;
           display: flex;
-          gap: 10px;
+          gap: 9px;
           align-items: flex-start;
-          margin-bottom: 8px;
+          margin-bottom: 6px;
         }
 
         .emergency-alert-icon {
@@ -1931,25 +2049,25 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .emergency-alert-body {
-          font-size: 0.76rem;
+          font-size: 0.74rem;
           color: #991b1b;
           line-height: 1.4;
         }
 
         .emergency-alert-body strong {
           display: block;
-          font-size: 0.82rem;
+          font-size: 0.80rem;
           margin-bottom: 2px;
           color: #b91c1c;
         }
 
         .bubble-text-content {
-          font-size: 0.92rem;
+          font-size: 0.90rem;
           line-height: 1.6;
         }
 
         .message-timestamp {
-          font-size: 0.66rem;
+          font-size: 0.65rem;
           font-weight: 500;
           margin-top: 2px;
         }
@@ -1968,14 +2086,14 @@ export const AIAssistantChat: React.FC = () => {
           display: flex;
           align-items: center;
           gap: 6px;
-          padding: 8px 4px;
+          padding: 6px 4px;
         }
 
         .typing-dot {
-          width: 7px;
-          height: 7px;
+          width: 6px;
+          height: 6px;
           border-radius: 50%;
-          background: #0f766e;
+          background: #059669;
           animation: dotPulse 1.2s infinite ease-in-out;
         }
 
@@ -1989,54 +2107,54 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .typing-text {
-          font-size: 0.76rem;
+          font-size: 0.74rem;
           font-weight: 600;
-          color: #0f766e;
-          margin-left: 4px;
+          color: #059669;
+          margin-left: 3px;
         }
 
         /* Followup Prompts Bar */
         .followup-prompts-bar {
-          padding: 8px 24px 10px 24px;
+          padding: 8px 18px 10px 18px;
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 6px;
           background: #f8fafc;
           border-top: 1px solid #f1f5f9;
         }
 
         .followup-prompts-label {
-          font-size: 0.72rem;
-          font-weight: 700;
+          font-size: 0.70rem;
+          font-weight: 750;
           color: #64748b;
           text-transform: uppercase;
           letter-spacing: 0.05em;
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 5px;
         }
 
         .followup-chips-container {
           display: flex;
-          gap: 10px;
+          gap: 8px;
           flex-wrap: wrap;
           align-items: center;
         }
 
         .followup-prompt-chip {
-          padding: 6px 14px;
+          padding: 5px 12px;
           border-radius: 9999px;
           border: 1px solid #a7f3d0;
           background: #ffffff;
-          font-size: 0.78rem;
+          font-size: 0.76rem;
           font-weight: 600;
           color: #047857;
           cursor: pointer;
           display: inline-flex;
           align-items: center;
-          gap: 6px;
+          gap: 5px;
           white-space: nowrap;
-          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
           transition: all 0.2s ease;
         }
 
@@ -2044,7 +2162,7 @@ export const AIAssistantChat: React.FC = () => {
           background: #ecfdf5;
           border-color: #6ee7b7;
           transform: translateY(-1px);
-          box-shadow: 0 2px 4px rgba(16, 185, 129, 0.12);
+          box-shadow: 0 2px 4px rgba(5, 150, 105, 0.12);
         }
 
         .followup-prompt-chip:disabled {
@@ -2054,7 +2172,7 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .chat-error-actions {
-          margin-top: 8px;
+          margin-top: 6px;
           display: flex;
           align-items: center;
         }
@@ -2062,9 +2180,9 @@ export const AIAssistantChat: React.FC = () => {
         .chat-retry-pill-btn {
           display: inline-flex;
           align-items: center;
-          gap: 6px;
-          padding: 5px 12px;
-          font-size: 0.75rem;
+          gap: 5px;
+          padding: 4px 11px;
+          font-size: 0.73rem;
           font-weight: 600;
           color: #dc2626;
           background: #fef2f2;
@@ -2089,9 +2207,9 @@ export const AIAssistantChat: React.FC = () => {
           flex-shrink: 0;
         }
 
-        /* Apple-Inspired Pill Composer */
+        /* Pill Composer */
         .chat-composer-wrapper {
-          padding: 14px 20px;
+          padding: 10px 18px;
           border-top: 1px solid #e2e8f0;
           background: #ffffff;
         }
@@ -2099,7 +2217,7 @@ export const AIAssistantChat: React.FC = () => {
         .chat-composer-form {
           display: flex;
           flex-direction: column;
-          gap: 6px;
+          gap: 5px;
           width: 100%;
         }
 
@@ -2109,15 +2227,15 @@ export const AIAssistantChat: React.FC = () => {
           background: #f8fafc;
           border: 1.5px solid #e2e8f0;
           border-radius: 20px;
-          padding: 4px 6px 4px 18px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+          padding: 3px 5px 3px 16px;
+          box-shadow: 0 1px 4px rgba(15, 23, 42, 0.02);
           transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         .composer-input-pill:focus-within {
-          border-color: #0f766e;
+          border-color: #059669;
           background: #ffffff;
-          box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+          box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12);
         }
 
         .composer-input-field {
@@ -2125,9 +2243,9 @@ export const AIAssistantChat: React.FC = () => {
           border: none;
           background: transparent;
           outline: none;
-          font-size: 0.92rem;
+          font-size: 0.90rem;
           color: #0f172a;
-          padding: 8px 6px;
+          padding: 7px 4px;
           font-family: inherit;
         }
 
@@ -2136,8 +2254,8 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .composer-send-btn {
-          width: 38px;
-          height: 38px;
+          width: 36px;
+          height: 36px;
           border-radius: 50%;
           border: none;
           background: #e2e8f0;
@@ -2151,172 +2269,21 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .composer-send-btn.active {
-          background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
+          background: linear-gradient(135deg, #059669 0%, #0d9488 100%);
           color: #ffffff;
           cursor: pointer;
-          box-shadow: 0 4px 12px rgba(15, 118, 110, 0.35);
+          box-shadow: 0 3px 10px rgba(5, 150, 105, 0.35);
         }
 
         .composer-send-btn.active:hover {
-          transform: scale(1.06);
+          transform: scale(1.05);
         }
 
         .composer-security-footer {
-          font-size: 0.68rem;
+          font-size: 0.67rem;
           color: #94a3b8;
           text-align: center;
           font-weight: 500;
-        }
-
-        /* Pro Modal */
-        .pro-modal-body {
-          display: flex;
-          flex-direction: column;
-          gap: 18px;
-          text-align: center;
-          align-items: center;
-          padding: 8px 0;
-        }
-
-        .pro-modal-crown {
-          width: 60px;
-          height: 60px;
-          border-radius: 50%;
-          background: #fef3c7;
-          color: #d97706;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .pro-modal-headings {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .pro-modal-title {
-          font-size: 1.25rem;
-          font-weight: 900;
-          color: #0f172a;
-          margin: 0;
-        }
-
-        .pro-modal-subtitle {
-          font-size: 0.85rem;
-          color: #64748b;
-          margin: 0;
-          max-width: 420px;
-          line-height: 1.5;
-        }
-
-        .pro-plans-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          width: 100%;
-        }
-
-        .pro-plan-card {
-          border: 1px solid #e2e8f0;
-          border-radius: 16px;
-          padding: 16px;
-          background: #f8fafc;
-          cursor: pointer;
-          text-align: left;
-          position: relative;
-          transition: all 0.2s ease;
-        }
-
-        .pro-plan-card.selected {
-          border: 2px solid #0f766e;
-          background: #ecfdf5;
-        }
-
-        .plan-badge-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .plan-badge {
-          font-size: 0.74rem;
-          font-weight: 800;
-          color: #0f766e;
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
-        }
-
-        .save-pill {
-          background: #dcfce7;
-          color: #059669;
-          font-size: 0.65rem;
-          font-weight: 800;
-          padding: 2px 6px;
-          border-radius: 6px;
-        }
-
-        .plan-price-row {
-          margin-top: 4px;
-        }
-
-        .price-num {
-          font-size: 1.35rem;
-          font-weight: 900;
-          color: #0f172a;
-        }
-
-        .price-cadence {
-          font-size: 0.78rem;
-          color: #64748b;
-          font-weight: 500;
-          margin-left: 2px;
-        }
-
-        .plan-note {
-          font-size: 0.72rem;
-          color: #64748b;
-          margin: 4px 0 0 0;
-        }
-
-        .plan-selected-check {
-          position: absolute;
-          top: 12px;
-          right: 12px;
-          color: #0f766e;
-        }
-
-        .pro-perks-card {
-          border: 1px solid #e2e8f0;
-          border-radius: 14px;
-          padding: 12px 16px;
-          width: 100%;
-          background: #f8fafc;
-          text-align: left;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-
-        .perk-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 0.8rem;
-          font-weight: 700;
-          color: #334155;
-        }
-
-        .perk-check {
-          color: #059669;
-          flex-shrink: 0;
-        }
-
-        .pro-actions {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          width: 100%;
         }
 
         /* Mobile Drawer Header and Backdrop */
@@ -2329,20 +2296,20 @@ export const AIAssistantChat: React.FC = () => {
         }
 
         .hero-emblem-icon {
-          width: 34px;
-          height: 34px;
+          width: 28px;
+          height: 28px;
         }
 
         .card-svg-icon {
-          width: 20px;
-          height: 20px;
+          width: 18px;
+          height: 18px;
         }
 
         /* Responsive Tablet Breakpoint (max-width: 860px) */
         @media (max-width: 860px) {
           .jivexa-ai-wrapper {
             height: auto;
-            min-height: calc(100vh - 120px);
+            min-height: calc(100vh - 110px);
             width: 100%;
             max-width: 100%;
             margin: 0;
@@ -2351,24 +2318,16 @@ export const AIAssistantChat: React.FC = () => {
 
           .jivexa-chat-split {
             grid-template-columns: 1fr;
-            gap: 12px;
+            gap: 10px;
           }
 
           .mobile-sidebar-toggle {
             display: inline-flex;
           }
 
-          .security-capsule {
-            display: none;
-          }
-
           .hero-suggestions-grid {
             grid-template-columns: 1fr;
-            gap: 12px;
-          }
-
-          .pro-plans-grid {
-            grid-template-columns: 1fr;
+            gap: 10px;
           }
 
           .btn-label-desktop {
@@ -2397,12 +2356,12 @@ export const AIAssistantChat: React.FC = () => {
             position: fixed;
             top: 0;
             left: 0;
-            width: 85%;
-            max-width: 340px;
+            width: 82%;
+            max-width: 320px;
             height: 100vh;
             z-index: 999;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
-            border-radius: 0 20px 20px 0;
+            border-radius: 0 16px 16px 0;
             background: #ffffff;
           }
 
@@ -2422,11 +2381,11 @@ export const AIAssistantChat: React.FC = () => {
             display: flex;
             align-items: center;
             gap: 8px;
-            color: #0f766e;
+            color: #059669;
           }
 
           .sidebar-mobile-title {
-            font-size: 0.88rem;
+            font-size: 0.86rem;
             font-weight: 750;
             color: #0f172a;
           }
@@ -2436,7 +2395,7 @@ export const AIAssistantChat: React.FC = () => {
             border: none;
             color: #64748b;
             cursor: pointer;
-            padding: 6px;
+            padding: 5px;
             border-radius: 8px;
             display: flex;
             align-items: center;
@@ -2449,463 +2408,130 @@ export const AIAssistantChat: React.FC = () => {
           }
         }
 
-        /* Dedicated Mobile Phone Breakpoint (max-width: 480px, optimizing 320px - 430px) */
+        /* Mobile Phone Breakpoint (max-width: 480px) */
         @media (max-width: 480px) {
           .jivexa-ai-wrapper {
-            gap: 10px;
+            gap: 8px;
             min-height: 0;
             overflow-x: hidden;
             width: 100%;
           }
 
-          /* 1. Header & Top Bar Optimization */
           .jivexa-ai-topbar {
-            padding: 12px 14px;
-            border-radius: 14px;
-            gap: 8px;
-            box-shadow: 0 4px 14px -3px rgba(15, 118, 110, 0.25);
+            padding: 10px 12px;
+            border-radius: 12px;
+            gap: 6px;
           }
 
           .topbar-branding {
-            gap: 10px;
+            gap: 9px;
             min-width: 0;
             flex: 1;
           }
 
           .avatar-orb {
-            width: 38px;
-            height: 38px;
-            min-width: 38px;
-            border-radius: 11px;
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            border-radius: 9px;
           }
 
           .avatar-icon {
-            width: 19px;
-            height: 19px;
-          }
-
-          .live-status-dot {
-            width: 9px;
-            height: 9px;
-            bottom: -1px;
-            right: -1px;
-          }
-
-          .topbar-titles {
-            gap: 2px;
-            min-width: 0;
-          }
-
-          .topbar-title-row {
-            gap: 6px;
-            align-items: center;
+            width: 17px;
+            height: 17px;
           }
 
           .topbar-title {
-            font-size: 1.05rem;
-            line-height: 1.22;
+            font-size: 1rem;
+            line-height: 1.2;
           }
 
           .clinical-pill {
-            font-size: 0.62rem;
-            padding: 2px 7px;
-            border-radius: 10px;
-            gap: 4px;
-            letter-spacing: 0.02em;
-          }
-
-          .pulse-beacon {
-            width: 5px;
-            height: 5px;
+            font-size: 0.60rem;
+            padding: 2px 6px;
+            border-radius: 8px;
           }
 
           .topbar-subtitle {
-            font-size: 0.74rem;
-            line-height: 1.35;
-            color: rgba(255, 255, 255, 0.84);
+            font-size: 0.72rem;
+            line-height: 1.3;
           }
 
           .mobile-sidebar-toggle {
-            padding: 6px 10px;
-            border-radius: 10px;
-            font-size: 0.76rem;
-            min-height: 36px;
-            gap: 5px;
+            padding: 5px 9px;
+            border-radius: 8px;
+            font-size: 0.74rem;
+            min-height: 32px;
           }
 
-          /* 2. Chat Workspace & Viewport Header */
           .jivexa-chat-main {
-            border-radius: 16px;
-            border: 1px solid #e2e8f0;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-            overflow-x: hidden;
-            width: 100%;
+            border-radius: 14px;
           }
 
           .chat-viewport-header {
-            padding: 8px 12px;
-            gap: 8px;
+            padding: 8px 10px;
           }
 
           .viewport-avatar {
-            width: 30px;
-            height: 30px;
-            min-width: 30px;
-            border-radius: 8px;
-          }
-
-          .viewport-avatar svg {
-            width: 15px;
-            height: 15px;
+            width: 28px;
+            height: 28px;
+            min-width: 28px;
+            border-radius: 7px;
           }
 
           .viewport-name {
-            font-size: 0.82rem;
+            font-size: 0.80rem;
           }
 
-          .live-pill {
-            font-size: 0.60rem;
-            padding: 1px 5px;
-          }
-
-          .viewport-model-label {
-            font-size: 0.66rem;
-          }
-
-          .viewport-action-btn {
-            padding: 4px 8px;
-            font-size: 0.72rem;
-            border-radius: 8px;
-          }
-
-          /* 3. Messages Container */
           .chat-messages-container {
-            padding: 10px 10px;
-            gap: 12px;
-            background: #ffffff;
-            overflow-x: hidden;
-            width: 100%;
-          }
-
-          /* 4. Clinical Advisory Banner */
-          .clinical-advisory-banner {
             padding: 8px 10px;
-            border-radius: 10px;
-            gap: 8px;
-          }
-
-          .advisory-icon {
-            width: 15px;
-            height: 15px;
-            margin-top: 2px;
-          }
-
-          .advisory-content {
-            font-size: 0.70rem;
-            line-height: 1.38;
-          }
-
-          .advisory-title {
-            font-size: 0.70rem;
-          }
-
-          .advisory-text {
-            font-size: 0.68rem;
-          }
-
-          /* 5. Welcome & Empty Hero Section */
-          .chat-empty-hero {
-            padding: 6px 0 14px 0;
-            gap: 12px;
-            max-width: 100%;
-            width: 100%;
-          }
-
-          .hero-emblem-glow {
-            width: 44px;
-            height: 44px;
-            filter: blur(6px);
-          }
-
-          .hero-emblem {
-            width: 40px;
-            height: 40px;
-            border-radius: 12px;
-            box-shadow: 0 4px 14px -2px rgba(15, 118, 110, 0.35);
-          }
-
-          .hero-emblem-icon {
-            width: 22px;
-            height: 22px;
-          }
-
-          .hero-headings {
-            gap: 3px;
-            padding: 0 2px;
-            width: 100%;
-          }
-
-          .hero-eyebrow {
-            font-size: 0.66rem;
-            font-weight: 750;
-            letter-spacing: 0.05em;
+            gap: 10px;
           }
 
           .hero-title {
-            font-size: 1.15rem;
-            font-weight: 800;
-            line-height: 1.3;
-            letter-spacing: -0.015em;
+            font-size: 1.10rem;
           }
 
           .hero-desc {
-            font-size: 0.78rem;
-            line-height: 1.42;
-            color: #64748b;
-            padding: 0 4px;
-          }
-
-          /* 6. Redesigned Feature Cards (Full Width, Consistent, High Readability) */
-          .hero-suggestions-grid {
-            grid-template-columns: 1fr;
-            gap: 10px;
-            width: 100%;
+            font-size: 0.76rem;
           }
 
           .suggestion-apple-card {
-            padding: 13px 14px;
-            border-radius: 14px;
-            gap: 8px;
-            border: 1px solid #e2e8f0;
-            background: #ffffff;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03), 0 3px 10px rgba(15, 118, 110, 0.03);
-            width: 100%;
-            box-sizing: border-box;
+            padding: 11px 12px;
+            border-radius: 12px;
           }
 
-          .suggestion-apple-card:active {
-            background: #f8fafc;
-            border-color: #0f766e;
-            transform: scale(0.99);
-          }
-
-          .card-top-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            width: 100%;
-          }
-
-          .card-icon-bubble {
-            width: 34px;
-            height: 34px;
-            min-width: 34px;
-            border-radius: 10px;
-          }
-
-          .card-svg-icon {
-            width: 18px;
-            height: 18px;
-          }
-
-          .card-category-badge {
-            font-size: 0.65rem;
-            padding: 2px 7px;
-            border-radius: 6px;
-            font-weight: 750;
-          }
-
-          .card-content {
-            gap: 2px;
-            width: 100%;
-            text-align: left;
-          }
-
-          .card-title {
-            font-size: 0.92rem;
-            font-weight: 750;
-            line-height: 1.3;
-            color: #0f172a;
-          }
-
-          .card-subtext {
-            font-size: 0.78rem;
-            line-height: 1.4;
-            color: #64748b;
-          }
-
-          .card-arrow-row {
-            padding-top: 6px;
-            min-height: 28px;
-            width: 100%;
-          }
-
-          .card-cta-label {
-            font-size: 0.74rem;
-            font-weight: 700;
-            color: #0f766e;
-          }
-
-          .card-arrow {
-            color: #0f766e;
-            width: 15px;
-            height: 15px;
-          }
-
-          /* 7. Quick Starter Chips */
-          .quick-starter-section {
-            padding: 4px 0 8px 0;
-            gap: 6px;
-            width: 100%;
-          }
-
-          .quick-starter-label {
-            font-size: 0.68rem;
-            font-weight: 750;
-          }
-
-          .quick-starter-chips {
-            gap: 6px;
-            justify-content: center;
-            width: 100%;
-          }
-
-          .quick-starter-chip {
-            padding: 5px 11px;
-            border-radius: 16px;
-            font-size: 0.73rem;
-            line-height: 1.3;
-          }
-
-          /* 8. Floating Composer on Mobile */
           .chat-composer-wrapper {
-            padding: 8px 10px;
-            border-top: 1px solid #e2e8f0;
-            background: #ffffff;
-            width: 100%;
-            box-sizing: border-box;
+            padding: 6px 8px;
           }
 
           .composer-input-pill {
-            padding: 3px 4px 3px 12px;
+            padding: 2px 3px 2px 10px;
             border-radius: 16px;
-            min-height: 40px;
-            border-width: 1px;
-          }
-
-          .composer-input-field {
-            font-size: 0.86rem;
-            padding: 5px 4px;
-            min-width: 0;
+            min-height: 38px;
           }
 
           .composer-send-btn {
-            width: 34px;
-            height: 34px;
-            min-width: 34px;
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
           }
 
-          .composer-security-footer {
-            font-size: 0.62rem;
-            line-height: 1.35;
-            padding: 2px 4px;
-          }
-
-          /* 9. Speech Bubbles on Mobile */
           .message-bubble-container {
             max-width: 95%;
-            gap: 8px;
           }
 
           .user-container {
             max-width: 90%;
           }
 
-          .message-avatar {
-            width: 28px;
-            height: 28px;
-            min-width: 28px;
-            border-radius: 8px;
-          }
-
-          .message-avatar svg {
-            width: 14px;
-            height: 14px;
-          }
-
           .speech-bubble {
-            padding: 10px 14px;
-            border-radius: 14px;
-            gap: 4px;
+            padding: 9px 12px;
+            border-radius: 12px;
           }
 
           .bubble-text-content {
-            font-size: 0.88rem;
-            line-height: 1.55;
-            word-break: break-word;
-          }
-
-          .followup-prompts-bar {
-            padding: 8px 10px;
-          }
-
-          .followup-chips-container {
-            gap: 6px;
-          }
-
-          .followup-prompt-chip {
-            font-size: 0.74rem;
-            padding: 5px 10px;
-            max-width: 100%;
-            white-space: normal;
-            text-align: left;
-          }
-        }
-
-        /* 10. Ultra-Narrow Devices (max-width: 360px, e.g. 320px - 360px) */
-        @media (max-width: 360px) {
-          .topbar-title {
-            font-size: 0.96rem;
-          }
-
-          .clinical-pill {
-            display: none;
-          }
-
-          .topbar-subtitle {
-            font-size: 0.68rem;
-            line-height: 1.3;
-          }
-
-          .hero-title {
-            font-size: 1.05rem;
-            line-height: 1.28;
-          }
-
-          .hero-desc {
-            font-size: 0.74rem;
-            line-height: 1.38;
-          }
-
-          .suggestion-apple-card {
-            padding: 11px 12px;
-          }
-
-          .card-title {
-            font-size: 0.88rem;
-          }
-
-          .card-subtext {
-            font-size: 0.74rem;
-          }
-
-          .chat-messages-container {
-            padding: 8px 8px;
-            gap: 10px;
-          }
-
-          .chat-composer-wrapper {
-            padding: 6px 8px;
+            font-size: 0.86rem;
           }
         }
       `}</style>

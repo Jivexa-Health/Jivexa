@@ -32,10 +32,10 @@ export const Card: React.FC<CardProps> = ({
       className={`card ${hoverable ? 'card-hover' : ''} ${className}`}
       style={{
         backgroundColor: 'var(--surface)',
-        borderRadius: 'var(--radius-lg)',
+        borderRadius: '16px',
         border: '1px solid var(--border)',
         padding: '24px',
-        boxShadow: 'var(--shadow-md)',
+        boxShadow: '0 1px 3px rgba(15, 23, 42, 0.04)',
         transition: 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
         ...style,
       }}

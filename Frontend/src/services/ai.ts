@@ -1,3 +1,23 @@
+export interface MedicalSource {
+  organization: string;
+  title: string;
+  url: string;
+  verified?: boolean;
+}
+
+export interface StructuredMedicalData {
+  intent?: string;
+  urgency_level?: 'emergency' | 'high_priority' | 'routine' | 'self_care' | 'informational';
+  answer_summary?: string;
+  key_information?: string[];
+  precautions?: string[];
+  warning_signs?: string[];
+  recommended_next_steps?: string[];
+  follow_up_questions?: string[];
+  medical_sources?: MedicalSource[];
+  disclaimer?: string;
+}
+
 export interface AIResponse {
   text: string;
   isEmergency: boolean;
@@ -8,6 +28,7 @@ export interface AIResponse {
   limitReached?: boolean;
   tokensUsed?: number;
   maxTokens?: number;
+  structuredData?: StructuredMedicalData;
 }
 
 import { getBackendUrl } from './nodeAuthService';
@@ -576,6 +597,7 @@ export const streamAIHealthAssistant = async (
       let responseProvider = 'JIVEXA AI (Google Gemini)';
       let streamSuggestions: string[] = [];
       let streamErrorCode: string | undefined;
+      let streamStructuredData: StructuredMedicalData | undefined;
 
       while (!doneReading) {
         const { value, done } = await reader.read();
@@ -599,6 +621,9 @@ export const streamAIHealthAssistant = async (
                 fullText += data.chunk;
                 onChunk(data.chunk, responseProvider, isEmergencyStream);
               }
+              if (data.structuredData) {
+                streamStructuredData = data.structuredData;
+              }
               if (data.suggestions && Array.isArray(data.suggestions)) {
                 streamSuggestions = data.suggestions;
               }
@@ -613,6 +638,9 @@ export const streamAIHealthAssistant = async (
                 if (data.isEmergency) {
                   isEmergencyStream = true;
                 }
+                if (data.structuredData) {
+                  streamStructuredData = data.structuredData;
+                }
                 doneReading = true;
               }
             } catch (e) {}
@@ -624,10 +652,11 @@ export const streamAIHealthAssistant = async (
         return {
           text: fullText,
           isEmergency: isEmergencyStream,
-          suggestions: streamErrorCode ? [] : streamSuggestions,
-          disclaimer: '',
+          suggestions: streamErrorCode ? [] : (streamStructuredData?.follow_up_questions || streamSuggestions),
+          disclaimer: streamStructuredData?.disclaimer || '',
           provider: responseProvider,
-          errorCode: streamErrorCode
+          errorCode: streamErrorCode,
+          structuredData: streamStructuredData
         };
       }
     }

@@ -8,7 +8,10 @@ import {
   cancelAppointmentApi,
   createPrescriptionApi,
   getPrescriptionsApi,
-  updatePrescriptionApi
+  updatePrescriptionApi,
+  getMedicalReportsApi,
+  saveMedicalReportApi,
+  deleteMedicalReportApi
 } from '../services/clinicalService';
 import {
   createPharmacyOrderApi,
@@ -245,6 +248,7 @@ interface HealthDataContextType {
   placePharmacyOrder: (pharmacyId: string, items: OrderItem[], prescriptionId?: string, deliveryAddress?: string) => Promise<{ success: boolean; order?: Order }>;
   updatePatientProfile: (data: Partial<PatientProfile>) => void;
   saveAnalyzedReport: (report: MedicalReportRecord) => void;
+  deleteMedicalReport: (reportId: string) => Promise<{ success: boolean; error?: string }>;
   shareReportWithDoctor: (reportId: string, doctorId: string) => Promise<{ success: boolean }>;
   
   // JHID & Consent Access Operations
@@ -347,6 +351,51 @@ const INITIAL_INVENTORY = (pharmId: string): InventoryItem[] => [
 
 const HealthDataContext = createContext<HealthDataContextType | undefined>(undefined);
 
+// Helper to map backend MongoDB report documents into Frontend MedicalReportRecord
+const mapMongoReportToRecord = (doc: any): MedicalReportRecord => {
+  return {
+    id: String(doc._id || doc.id),
+    patientId: String(doc.patientId),
+    fileName: doc.fileName || 'Medical_Report.pdf',
+    fileType: 'application/pdf',
+    fileSize: doc.fileSize || 'Standard',
+    fileUrl: doc.fileUrl || '/assets/report_preview.pdf',
+    uploadedAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : new Date().toISOString(),
+    analysis: {
+      id: String(doc._id || doc.id),
+      reportId: String(doc._id || doc.id),
+      reportTitle: doc.reportTitle || doc.fileName || 'Clinical Lab Report',
+      reportDate: doc.reportDate || '',
+            healthScore: doc.healthScore,
+      scoreStatus: doc.scoreStatus || 'Analysis Complete',
+      scoreFormula: doc.scoreFormula || '',
+      scoreMethodology: doc.scoreMethodology || '',
+      dataCompleteness: doc.dataCompleteness || { analyzed: doc.parameters?.length || 0, expected: 8, percentage: 100, statusText: 'Verified' },
+      summaryCounts: doc.summaryCounts || {
+        total: doc.parameters?.length || 0,
+        inRange: doc.normalFindings?.length || 0,
+        aboveRange: doc.abnormalFindings?.length || 0,
+        belowRange: 0,
+        needsReview: doc.unverifiedParameters?.length || 0,
+        verifiedCount: (doc.parameters?.length || 0) - (doc.unverifiedParameters?.length || 0)
+      },
+      summary: doc.summary || '',
+      parameters: doc.parameters || [],
+      normalFindings: doc.normalFindings || [],
+      abnormalFindings: doc.abnormalFindings || [],
+      attentionParameters: doc.attentionParameters || [],
+      needsReview: doc.unverifiedParameters || doc.needsReview || [],
+      possibleFactors: doc.possibleFactors || [],
+      questionsForDoctor: doc.questionsForDoctor || [],
+      lifestyleSuggestions: doc.lifestyleRecommendations || [],
+      disclaimer: doc.disclaimer || 'Educational healthcare information only.',
+      analyzedAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : new Date().toISOString(),
+      extractionStatus: doc.extractionStatus,
+      aiStatus: doc.aiStatus
+    }
+  };
+};
+
 export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const userId = user?.id || '';
@@ -365,8 +414,24 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [patientProfile, setPatientProfile] = useState<PatientProfile | null>(null);
 
   const [medicalReports, setMedicalReports] = useState<MedicalReportRecord[]>(() => {
-    const saved = localStorage.getItem('jivexa_db_medical_reports');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      localStorage.removeItem('jivexa_db_medical_reports');
+    } catch (e) {}
+
+    let initialUserId = '';
+    try {
+      const activeUserJSON = localStorage.getItem('jivexa_session_user');
+      if (activeUserJSON) {
+        const u = JSON.parse(activeUserJSON);
+        initialUserId = u.id || '';
+      }
+    } catch (e) {}
+
+    if (initialUserId) {
+      const saved = localStorage.getItem(`jivexa_db_medical_reports_${initialUserId}`);
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
   });
 
   const [sharedReports, setSharedReports] = useState<SharedReportRecord[]>(() => {
@@ -374,12 +439,65 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return saved ? JSON.parse(saved) : [];
   });
 
-  const saveAnalyzedReport = (report: MedicalReportRecord) => {
+  const saveAnalyzedReport = async (report: MedicalReportRecord) => {
     setMedicalReports((prev) => {
       const updated = [report, ...prev.filter((r) => r.id !== report.id)];
-      localStorage.setItem('jivexa_db_medical_reports', JSON.stringify(updated));
+      if (userId) {
+        localStorage.setItem(`jivexa_db_medical_reports_${userId}`, JSON.stringify(updated));
+      }
       return updated;
     });
+
+    if (userId) {
+      try {
+        await saveMedicalReportApi({
+          reportId: report.id,
+          fileName: report.fileName,
+          fileSize: report.fileSize,
+          reportTitle: report.analysis?.reportTitle || report.fileName,
+          reportDate: report.analysis?.reportDate || '',
+          healthScore: report.analysis?.healthScore,
+          scoreStatus: report.analysis?.scoreStatus,
+          scoreFormula: report.analysis?.scoreFormula,
+          scoreMethodology: report.analysis?.scoreMethodology,
+          dataCompleteness: report.analysis?.dataCompleteness,
+          summaryCounts: report.analysis?.summaryCounts,
+          summary: report.analysis?.summary,
+          parameters: report.analysis?.parameters,
+          normalFindings: report.analysis?.normalFindings,
+          abnormalFindings: report.analysis?.abnormalFindings,
+          attentionParameters: report.analysis?.attentionParameters,
+          unverifiedParameters: report.analysis?.needsReview || (report.analysis as any)?.unverifiedParameters,
+          possibleFactors: report.analysis?.possibleFactors,
+          questionsForDoctor: report.analysis?.questionsForDoctor,
+          lifestyleRecommendations: report.analysis?.lifestyleSuggestions,
+          disclaimer: report.analysis?.disclaimer
+        });
+      } catch (e) {
+        console.warn('[HealthDataContext] Background sync of analyzed report failed:', e);
+      }
+    }
+  };
+
+  const deleteMedicalReport = async (reportId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await deleteMedicalReportApi(reportId);
+      if (!res.success) {
+        return { success: false, error: res.error || 'Failed to delete medical report' };
+      }
+
+      setMedicalReports((prev) => {
+        const updated = prev.filter((r) => r.id !== reportId);
+        if (userId) {
+          localStorage.setItem(`jivexa_db_medical_reports_${userId}`, JSON.stringify(updated));
+        }
+        return updated;
+      });
+
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message || 'Failed to delete report' };
+    }
   };
 
   const shareReportWithDoctor = async (reportId: string, doctorId: string): Promise<{ success: boolean }> => {
@@ -450,7 +568,15 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Load health data and MongoDB-backed records on mount and whenever userId changes
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      setMedicalReports([]);
+      setPatientProfile(null);
+      setAppointments([]);
+      setHealthRecords([]);
+      setPrescriptions([]);
+      setOrders([]);
+      return;
+    }
 
     const rawName = user?.name || 'Patient';
     const rawEmail = user?.email || '';
@@ -616,6 +742,20 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
       } catch (e) {}
 
+      // 9. Fetch Live Persistent Medical Reports from MongoDB
+      try {
+        const liveReportsRes = await getMedicalReportsApi();
+        if (liveReportsRes.success && Array.isArray(liveReportsRes.reports)) {
+          const mapped = liveReportsRes.reports.map(mapMongoReportToRecord);
+          setMedicalReports(mapped);
+          localStorage.setItem(`jivexa_db_medical_reports_${userId}`, JSON.stringify(mapped));
+        } else {
+          const cached = localStorage.getItem(`jivexa_db_medical_reports_${userId}`);
+          setMedicalReports(cached ? JSON.parse(cached) : []);
+        }
+      } catch (e) {
+        console.warn('[HealthDataContext] Could not fetch MongoDB medical reports:', e);
+      }
       // 8. Fetch Live Persistent Ambulance Requests from MongoDB
       try {
         const liveAmbRes = await getAmbulanceRequestsApi();
@@ -1353,6 +1493,7 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       placePharmacyOrder,
       updatePatientProfile,
       saveAnalyzedReport,
+      deleteMedicalReport,
       shareReportWithDoctor,
       generateOrGetHealthId,
       searchPatientByHealthId,

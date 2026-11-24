@@ -636,16 +636,34 @@ const MongoDb = {
 
   // --- MEDICAL REPORTS ---
   medicalReports: {
+    resetTestReports() {
+      localStore.medicalReports = [];
+      persistLocalStore();
+    },
     async create(data) {
       if (isDatabaseConnected()) {
         try {
           const payload = { ...data };
           if (payload.id && !payload._id) payload._id = String(payload.id);
+          const existing = await MedicalReport.findOne({ _id: payload._id });
+          if (existing) {
+            if (payload.patientId && String(existing.patientId) !== String(payload.patientId)) {
+              throw new Error('Unauthorized report update');
+            }
+            return await MedicalReport.findOneAndUpdate({ _id: payload._id }, payload, { new: true });
+          }
           return await MedicalReport.create(payload);
-        } catch (err) {}
+        } catch (err) {
+          if (err.message === 'Unauthorized report update') throw err;
+        }
       }
       const payload = { ...data, _id: String(data._id || data.id || new mongoose.Types.ObjectId()), createdAt: new Date() };
-      localStore.medicalReports.push(payload);
+      const idx = localStore.medicalReports.findIndex(m => String(m._id || m.id) === String(payload._id));
+      if (idx >= 0) {
+        localStore.medicalReports[idx] = payload;
+      } else {
+        localStore.medicalReports.push(payload);
+      }
       persistLocalStore();
       return payload;
     },
@@ -656,7 +674,14 @@ const MongoDb = {
           return await MedicalReport.find(filter).sort({ createdAt: -1 });
         } catch (err) {}
       }
-      return [...localStore.medicalReports].reverse();
+      return [...localStore.medicalReports].filter(m => {
+        if (filter.patientId && String(m.patientId) !== String(filter.patientId)) return false;
+        if (filter['sharedWithDoctors.doctorId']) {
+          const docId = filter['sharedWithDoctors.doctorId'];
+          return Array.isArray(m.sharedWithDoctors) && m.sharedWithDoctors.some(d => String(d.doctorId) === String(docId));
+        }
+        return true;
+      }).reverse();
     },
 
     async findById(id) {

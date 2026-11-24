@@ -16,15 +16,41 @@ import {
   RefreshCw, FileCheck, FileSpreadsheet, MessageSquare, Send, User as UserIcon,
   AlertCircle, FileCode, CheckCheck, Lock, Activity, Heart, Stethoscope, 
   Apple, Mic, Paperclip, Check, ThumbsUp, ThumbsDown, Crown, Zap,
-  ArrowUpRight, ArrowDownRight, Edit3, Filter, Info, TrendingUp, BarChart2, Eye
+  ArrowUpRight, ArrowDownRight, Edit3, Filter, Info, TrendingUp, BarChart2, Eye, Trash2
 } from 'lucide-react';
 
 export const AIReportAnalyzer: React.FC = () => {
   const { user } = useAuth();
-  const { doctors, medicalReports, saveAnalyzedReport, shareReportWithDoctor } = useHealthData();
+  const { doctors, medicalReports, saveAnalyzedReport, shareReportWithDoctor, deleteMedicalReport } = useHealthData();
 
   // Active View Tab: 'Analyzer' | 'History'
   const [activeTab, setActiveTab] = useState<'Analyzer' | 'History'>('Analyzer');
+  // Demo Mode & Report Deletion State
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
+  const [reportToDelete, setReportToDelete] = useState<MedicalReportRecord | null>(null);
+  const [isDeletingReport, setIsDeletingReport] = useState<boolean>(false);
+
+  const handleConfirmDeleteReport = async () => {
+    if (!reportToDelete) return;
+    setIsDeletingReport(true);
+    try {
+      const res = await deleteMedicalReport(reportToDelete.id);
+      if (res.success) {
+        if (currentAnalysis?.reportId === reportToDelete.id || (currentAnalysis as any)?.id === reportToDelete.id) {
+          setCurrentAnalysis(null);
+        }
+        setToastMsg(`Medical report "${reportToDelete.fileName}" deleted successfully.`);
+        setReportToDelete(null);
+      } else {
+        setToastMsg(`Failed to delete report: ${res.error || 'Server error'}`);
+      }
+    } catch (e: any) {
+      setToastMsg(`Error deleting report: ${e.message || 'Unknown error'}`);
+    } finally {
+      setIsDeletingReport(false);
+    }
+  };
+
 
   // Upload & Drag-and-Drop State
   const [isDragging, setIsDragging] = useState(false);
@@ -503,13 +529,13 @@ export const AIReportAnalyzer: React.FC = () => {
       {/* Toast Notification */}
       {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg('')} />}
 
-      {/* Modern Glassmorphic Header Banner */}
+      {/* CLINICAL REPORT ANALYZER HERO BANNER */}
       <div style={{
-        background: 'linear-gradient(135deg, #0f766e 0%, #115e59 50%, #0d9488 100%)',
-        color: 'white',
-        borderRadius: '24px',
-        padding: '36px',
-        boxShadow: '0 20px 40px -15px rgba(15, 118, 110, 0.35)',
+        backgroundColor: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '18px',
+        padding: '28px 32px',
+        boxShadow: '0 2px 8px -2px rgba(15, 23, 42, 0.05)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
@@ -518,38 +544,51 @@ export const AIReportAnalyzer: React.FC = () => {
         position: 'relative',
         overflow: 'hidden'
       }}>
-        {/* Ambient glow shapes */}
-        <div style={{ position: 'absolute', top: '-60px', right: '-60px', width: '220px', height: '220px', borderRadius: '50%', background: 'rgba(94, 234, 212, 0.15)', filter: 'blur(40px)', pointerEvents: 'none' }} />
+        {/* Subtle accent bar on the top edge */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #059669 0%, #0d9488 50%, #10b981 100%)' }} />
 
-        <div style={{ maxWidth: '640px', zIndex: 2 }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', backgroundColor: 'rgba(255, 255, 255, 0.18)', backdropFilter: 'blur(10px)', padding: '6px 14px', borderRadius: '20px', fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.04em', marginBottom: '14px' }}>
-            <Sparkles size={14} style={{ color: '#5eead4' }} />
+        <div style={{ maxWidth: '640px' }}>
+          <div style={{ 
+            display: 'inline-flex', 
+            alignItems: 'center', 
+            gap: '8px', 
+            backgroundColor: '#ecfdf5', 
+            border: '1px solid #a7f3d0',
+            color: '#047857',
+            padding: '4px 12px', 
+            borderRadius: '20px', 
+            fontSize: '0.74rem', 
+            fontWeight: 800, 
+            letterSpacing: '0.04em', 
+            marginBottom: '10px' 
+          }}>
+            <Sparkles size={13} style={{ color: 'var(--primary)' }} />
             JIVEXA HEALTH OS • CLINICAL LAB INTELLIGENCE
           </div>
-          <h1 style={{ color: 'white', fontWeight: 900, fontSize: '2.1rem', marginBottom: '10px', letterSpacing: '-0.02em' }}>
+          <h1 style={{ color: 'var(--text-main)', fontWeight: 800, fontSize: '1.5rem', marginBottom: '6px', letterSpacing: '-0.02em', margin: 0 }}>
             Accurate Medical Report Analyzer
           </h1>
-          <p style={{ color: '#ccfbf1', fontSize: '0.96rem', lineHeight: '1.65' }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', lineHeight: '1.55', marginTop: '6px', marginBottom: 0 }}>
             Extract laboratory test parameters, evaluate against exact laboratory reference intervals, review unverified values, and track longitudinal health scorecards across all your reports.
           </p>
         </div>
 
         {/* Tab switch */}
-        <div style={{ display: 'flex', gap: '12px', zIndex: 2 }}>
+        <div style={{ display: 'flex', gap: '10px' }}>
           <Button 
             onClick={() => setActiveTab('Analyzer')} 
-            variant={activeTab === 'Analyzer' ? 'secondary' : 'outline'}
-            style={{ color: 'white', borderColor: 'rgba(255,255,255,0.4)', height: '44px', borderRadius: '14px', padding: '0 20px', fontWeight: 700 }}
+            variant={activeTab === 'Analyzer' ? 'primary' : 'outline'}
+            style={{ height: '42px', borderRadius: '12px', padding: '0 18px', fontWeight: 700, fontSize: '0.86rem' }}
           >
-            <Sparkles size={16} />
+            <Sparkles size={15} />
             Report Analyzer
           </Button>
           <Button 
             onClick={() => setActiveTab('History')} 
-            variant={activeTab === 'History' ? 'secondary' : 'outline'}
-            style={{ color: 'white', borderColor: 'rgba(255,255,255,0.4)', height: '44px', borderRadius: '14px', padding: '0 20px', fontWeight: 700 }}
+            variant={activeTab === 'History' ? 'primary' : 'outline'}
+            style={{ height: '42px', borderRadius: '12px', padding: '0 18px', fontWeight: 700, fontSize: '0.86rem' }}
           >
-            <History size={16} />
+            <History size={15} />
             Report Vault & Scorecard ({vaultReportCount})
           </Button>
         </div>
@@ -592,7 +631,7 @@ export const AIReportAnalyzer: React.FC = () => {
                     transition: 'all 0.25s ease'
                   }}
                 >
-                  <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'linear-gradient(135deg, #0f766e 0%, #10b981 100%)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 20px -5px rgba(15, 118, 110, 0.4)' }}>
+                  <div style={{ width: '60px', height: '60px', borderRadius: '16px', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <FileSpreadsheet size={32} />
                   </div>
                   <div>
@@ -624,43 +663,63 @@ export const AIReportAnalyzer: React.FC = () => {
                   </Button>
                 </label>
 
-                {/* Sample Reports Quick Loader */}
-                <div style={{ borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '12px' }}>
-                    ⚡ Test immediately with verified sample clinical reports:
-                  </span>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }} className="grid-2-mobile">
-                    {SAMPLE_LAB_REPORTS.map((sample) => (
-                      <div 
-                        key={sample.id}
-                        onClick={() => handleSelectSample(sample)}
-                        style={{
-                          border: '1px solid var(--border)',
-                          borderRadius: '16px',
-                          padding: '16px 20px',
-                          backgroundColor: 'white',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          transition: 'all 0.2s ease',
-                          boxShadow: 'var(--shadow-sm)'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                          <div style={{ width: '38px', height: '38px', borderRadius: '10px', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <FileText size={20} />
-                          </div>
-                          <div>
-                            <h4 style={{ fontSize: '0.92rem', fontWeight: 700 }}>{sample.title}</h4>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{sample.fileName} • {sample.fileSize}</span>
-                          </div>
-                        </div>
-                        <ArrowRight size={16} style={{ color: 'var(--primary)' }} />
-                      </div>
-                    ))}
-                  </div>
+                {/* Isolated Developer Testing Sandbox (Hidden by default from real patients) */}
+                <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsDemoMode(!isDemoMode)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-light)',
+                      fontSize: '0.76rem',
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      padding: '4px 8px'
+                    }}
+                  >
+                    {isDemoMode ? '✕ Hide Developer Demo Samples' : '🧪 Developer Sandbox: Test Synthetic Reports'}
+                  </button>
                 </div>
+
+                {isDemoMode && (
+                  <div style={{ borderTop: '1px dashed var(--border)', paddingTop: '16px', marginTop: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                      <AlertTriangle size={14} style={{ color: 'var(--warning)' }} />
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--warning-dark)', textTransform: 'uppercase' }}>
+                        Developer Testing Mode Only (Synthetic Clinical Mock Data)
+                      </span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }} className="grid-2-mobile">
+                      {SAMPLE_LAB_REPORTS.map((sample) => (
+                        <div 
+                          key={sample.id}
+                          onClick={() => handleSelectSample(sample)}
+                          style={{
+                            border: '1px solid var(--border)',
+                            borderRadius: '12px',
+                            padding: '12px 14px',
+                            backgroundColor: '#fafafa',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            transition: 'all 0.2s ease'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <FileText size={18} style={{ color: 'var(--text-muted)' }} />
+                            <div>
+                              <h4 style={{ fontSize: '0.85rem', fontWeight: 700, margin: 0 }}>{sample.title}</h4>
+                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>[Synthetic Mock] {sample.fileSize}</span>
+                            </div>
+                          </div>
+                          <ArrowRight size={14} style={{ color: 'var(--primary)' }} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
               </div>
             </Card>
@@ -696,7 +755,7 @@ export const AIReportAnalyzer: React.FC = () => {
             <Card style={{ borderRadius: '24px', padding: '28px' }} title={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}><Activity size={22} style={{ color: 'var(--primary)' }} /><span style={{ fontWeight: 800, fontSize: '1.15rem' }}>AI Medical Report Assistant (Chatbot B)</span><span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 10px', borderRadius: '12px', backgroundColor: '#f1f5f9', color: '#64748b' }}>⚪ WAITING_FOR_REPORT</span></div>}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: '#f8fafc', padding: '24px', borderRadius: '18px', border: '1px dashed var(--border)' }}>
                 <p style={{ margin: 0, fontSize: '0.92rem', color: 'var(--text-muted)', lineHeight: '1.6' }}>
-                  💡 <strong>No active report context selected:</strong> Upload a medical lab report (PDF/Image) above or select one from the quick samples or Report Vault to unlock dedicated report follow-up questions with JIVEXA Report Assistant.
+                  💡 <strong>No active report context selected:</strong> Upload a medical lab report (PDF/Image) above or select one from your Report Vault to unlock dedicated report follow-up questions with JIVEXA Report Assistant.
                 </p>
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                   {CHIP_QUESTIONS.slice(0, 4).map((chip, idx) => (
@@ -1467,6 +1526,30 @@ export const AIReportAnalyzer: React.FC = () => {
                         >
                           View In Analyzer & Chat
                         </Button>
+
+                        <button 
+                          type="button"
+                          onClick={() => setReportToDelete(rep)}
+                          style={{
+                            height: '36px',
+                            padding: '0 12px',
+                            fontSize: '0.82rem',
+                            borderRadius: '10px',
+                            fontWeight: 700,
+                            border: '1px solid #fecaca',
+                            backgroundColor: '#fff5f5',
+                            color: '#dc2626',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease'
+                          }}
+                          title="Delete this medical report"
+                        >
+                          <Trash2 size={14} />
+                          Delete
+                        </button>
                       </div>
                     </div>
                   );

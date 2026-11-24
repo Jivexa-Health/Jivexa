@@ -8,6 +8,7 @@ const {
   getMedicalReports,
   getMedicalReportById,
   shareMedicalReport,
+  deleteMedicalReport,
   getUserUsageStats, 
   upgradeUserPro, 
   getAdminAiMetrics,
@@ -21,8 +22,8 @@ const { protect, optionalProtect } = require('../middleware/authMiddleware');
 
 // Streaming SSE Chat Endpoint (identifies user if authenticated, supports reportContext)
 router.post('/chat', optionalProtect, handleChatRequest);
-// Streaming SSE Medical Report Chat Endpoint (Chatbot B)
-router.post('/report-chat', optionalProtect, handleReportChatRequest);
+// Streaming SSE Medical Report Chat Endpoint (Chatbot B - Authenticated Patient Report Consultation)
+router.post('/report-chat', protect, handleReportChatRequest);
 
 // Real-Time Clinical Report Analyzer & Biomarker Extraction Endpoint
 router.post('/analyze-report', optionalProtect, handleAnalyzeReport);
@@ -47,6 +48,7 @@ router.delete('/conversations', protect, clearAllConversations);
 router.get('/reports', protect, getMedicalReports);
 router.get('/reports/:id', protect, getMedicalReportById);
 router.post('/reports', protect, saveMedicalReport);
+router.delete('/reports/:id', protect, deleteMedicalReport);
 router.post('/reports/:id/share', protect, shareMedicalReport);
 
 module.exports = router;

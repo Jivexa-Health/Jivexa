@@ -65,9 +65,7 @@ export const HealthRecordsExplorer: React.FC = () => {
     }
   ];
 
-  const patientRecs = healthRecords.length > 0 
-    ? healthRecords.filter((r) => r.patientId === user?.id || !r.patientId) 
-    : defaultRecords;
+  const patientRecs = healthRecords.filter((r) => !user?.id || r.patientId === user?.id);
   
   const filteredRecs = patientRecs.filter((rec) => {
     const matchesSearch = rec.name.toLowerCase().includes(search.toLowerCase()) || 
@@ -141,66 +139,76 @@ export const HealthRecordsExplorer: React.FC = () => {
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '28px' }}>
       
-      {/* JIVEXA BRAND GRADIENT HEADER */}
+      {/* CLINICAL VAULT HERO BANNER */}
       <div style={{
-        background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 50%, #10b981 100%)',
-        borderRadius: '24px',
-        padding: '32px 36px',
-        color: 'white',
-        boxShadow: '0 12px 30px -8px rgba(15, 118, 110, 0.4)',
+        backgroundColor: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '18px',
+        padding: '28px 32px',
+        boxShadow: '0 2px 8px -2px rgba(15, 23, 42, 0.05)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         flexWrap: 'wrap',
-        gap: '20px'
+        gap: '24px',
+        position: 'relative',
+        overflow: 'hidden'
       }}>
+        {/* Subtle accent bar on the top edge */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #059669 0%, #0d9488 50%, #10b981 100%)' }} />
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <div style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '50%',
-            backgroundColor: 'rgba(255, 255, 255, 0.2)',
-            border: '2px solid rgba(255, 255, 255, 0.4)',
+            width: '56px',
+            height: '56px',
+            borderRadius: '14px',
+            backgroundColor: 'var(--primary-light)',
+            color: 'var(--primary)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'white',
-            backdropFilter: 'blur(10px)'
+            flexShrink: 0
           }}>
-            <FileText size={32} />
+            <FileText size={28} />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'white' }}>My Health Records Vault</h1>
-              <span style={{ backgroundColor: 'rgba(255, 255, 255, 0.25)', fontSize: '0.72rem', fontWeight: 700, padding: '2px 10px', borderRadius: '12px', color: 'white' }}>256-Bit Encrypted</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h1 style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--text-main)', margin: 0, letterSpacing: '-0.02em' }}>
+                My Health Records Vault
+              </h1>
+              <span style={{ 
+                backgroundColor: '#ecfdf5', 
+                border: '1px solid #a7f3d0',
+                fontSize: '0.72rem', 
+                fontWeight: 700, 
+                padding: '3px 10px', 
+                borderRadius: '20px', 
+                color: '#047857' 
+              }}>
+                Encrypted Storage
+              </span>
             </div>
-            <p style={{ opacity: 0.9, fontSize: '0.88rem', marginTop: '4px' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '6px', marginBottom: 0 }}>
               Securely store, organize, and analyze your lab reports, prescriptions, and clinical scans.
             </p>
           </div>
         </div>
 
-        <button 
+        <Button 
           onClick={() => setIsUploadOpen(true)}
           style={{
-            background: '#ffffff',
-            color: '#0f766e',
-            borderRadius: '14px',
-            padding: '12px 24px',
-            fontWeight: 800,
-            fontSize: '0.92rem',
-            border: 'none',
-            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.15)',
-            cursor: 'pointer',
+            borderRadius: '12px',
+            padding: '10px 20px',
+            fontWeight: 700,
+            fontSize: '0.88rem',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '8px',
-            transition: 'all 0.2s ease'
+            gap: '8px'
           }}
         >
-          <Plus size={18} style={{ color: '#0f766e' }} />
+          <Plus size={16} />
           Upload New Document
-        </button>
+        </Button>
       </div>
 
       {/* SEARCH BAR & FILTER PILLS CARD */}
@@ -218,26 +226,43 @@ export const HealthRecordsExplorer: React.FC = () => {
           
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-light)', textTransform: 'uppercase', marginRight: '4px' }}>Filter:</span>
-            {['All', 'Lab Report', 'Prescription', 'Other'].map((tag) => (
-              <button
-                key={tag}
-                onClick={() => setFilterType(tag)}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: '20px',
-                  border: '1px solid',
-                  borderColor: filterType === tag ? 'var(--primary)' : 'var(--border)',
-                  fontSize: '0.82rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  backgroundColor: filterType === tag ? 'var(--primary-light)' : 'white',
-                  color: filterType === tag ? 'var(--primary)' : 'var(--text-muted)',
-                  transition: 'all 0.2s ease'
-                }}
-              >
-                {tag === 'All' ? 'All Documents' : tag}
-              </button>
-            ))}
+            {['All', 'Lab Report', 'Prescription', 'Other'].map((tag) => {
+              const count = tag === 'All' 
+                ? patientRecs.length 
+                : patientRecs.filter(r => r.type === tag).length;
+              return (
+                <button
+                  key={tag}
+                  onClick={() => setFilterType(tag)}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '20px',
+                    border: '1px solid',
+                    borderColor: filterType === tag ? 'var(--primary)' : 'var(--border)',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    backgroundColor: filterType === tag ? 'var(--primary-light)' : 'white',
+                    color: filterType === tag ? 'var(--primary)' : 'var(--text-muted)',
+                    transition: 'all 0.2s ease',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <span>{tag === 'All' ? 'All Documents' : tag}</span>
+                  <span style={{
+                    fontSize: '0.72rem',
+                    backgroundColor: filterType === tag ? 'var(--primary)' : '#f1f5f9',
+                    color: filterType === tag ? 'white' : 'var(--text-muted)',
+                    padding: '1px 7px',
+                    borderRadius: '10px'
+                  }}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </Card>
@@ -404,11 +429,11 @@ export const HealthRecordsExplorer: React.FC = () => {
         </form>
       </Modal>
 
-      {/* HIPAA & 256-BIT ENCRYPTION SECURITY NOTICE */}
+      {/* STORAGE ENCRYPTION SECURITY NOTICE */}
       <div style={{ display: 'flex', gap: '14px', alignItems: 'center', backgroundColor: '#f0fdfa', padding: '18px 24px', borderRadius: '20px', border: '1px solid rgba(15, 118, 110, 0.2)' }}>
         <ShieldCheck size={24} style={{ color: 'var(--primary)', flexShrink: 0 }} />
         <span style={{ fontSize: '0.82rem', color: 'var(--text-main)', lineHeight: '1.5' }}>
-          <strong>Security Notice:</strong> All uploaded medical documents are encrypted at rest with 256-bit AES protection. Practitioners can inspect reports only when you explicitly authorize medical appointments or click share.
+          <strong>Security Notice:</strong> All uploaded medical documents are protected in transit via TLS 1.3 and stored with database encryption at rest. Practitioners can inspect reports only when you explicitly authorize medical appointments or click share.
         </span>
       </div>
 

@@ -22,12 +22,18 @@ export const Button: React.FC<ButtonProps> = ({
   const getVariantStyles = (): React.CSSProperties => {
     switch (variant) {
       case 'secondary':
+        return {
+          backgroundColor: 'var(--primary-light)',
+          color: 'var(--primary)',
+          border: '1px solid rgba(5, 150, 105, 0.25)',
+          boxShadow: 'none',
+        };
       case 'outline':
         return {
           backgroundColor: 'transparent',
-          color: 'var(--primary)',
-          border: '1.5px solid rgba(2, 132, 199, 0.4)',
-          boxShadow: 'none',
+          color: 'var(--text-main)',
+          border: '1px solid var(--border)',
+          boxShadow: 'var(--shadow-sm)',
         };
       case 'ghost':
       case 'text':
@@ -45,15 +51,15 @@ export const Button: React.FC<ButtonProps> = ({
           background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
           color: 'white',
           border: 'none',
-          boxShadow: '0 4px 14px -2px rgba(239, 68, 68, 0.35)',
+          boxShadow: '0 2px 8px -1px rgba(239, 68, 68, 0.35)',
         };
       case 'primary':
       default:
         return {
-          background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+          background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
           color: 'white',
           border: 'none',
-          boxShadow: '0 4px 14px -2px rgba(2, 132, 199, 0.35)',
+          boxShadow: '0 2px 8px -1px rgba(5, 150, 105, 0.35)',
         };
     }
   };

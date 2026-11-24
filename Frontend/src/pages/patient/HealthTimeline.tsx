@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useHealthData } from '../../context/HealthDataContext';
 import { Card } from '../../components/ui/Card';
+import { Button } from '../../components/ui/Button';
 import { 
   Activity, Calendar, FileText, ShoppingBag, 
   UserPlus, CheckCircle, ArrowDown, ArrowUp 
@@ -175,65 +176,77 @@ export const PatientHealthTimeline: React.FC = () => {
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '28px' }}>
       
-      {/* BRAND HEADER BANNER */}
+      {/* CLINICAL TIMELINE HERO BANNER */}
       <div style={{
-        background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 50%, #10b981 100%)',
-        borderRadius: '24px',
-        padding: '32px 36px',
-        color: 'white',
-        boxShadow: '0 12px 30px -8px rgba(15, 118, 110, 0.4)',
+        backgroundColor: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '18px',
+        padding: '28px 32px',
+        boxShadow: '0 2px 8px -2px rgba(15, 23, 42, 0.05)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         flexWrap: 'wrap',
-        gap: '20px'
+        gap: '24px',
+        position: 'relative',
+        overflow: 'hidden'
       }}>
+        {/* Subtle accent bar on the top edge */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #059669 0%, #0d9488 50%, #10b981 100%)' }} />
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <div style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '50%',
-            backgroundColor: 'rgba(255, 255, 255, 0.2)',
-            border: '2px solid rgba(255, 255, 255, 0.4)',
+            width: '56px',
+            height: '56px',
+            borderRadius: '14px',
+            backgroundColor: 'var(--primary-light)',
+            color: 'var(--primary)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'white',
-            backdropFilter: 'blur(10px)'
+            flexShrink: 0
           }}>
-            <Activity size={32} />
+            <Activity size={28} />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'white' }}>My Medical Health Timeline</h1>
-              <span style={{ backgroundColor: 'rgba(255, 255, 255, 0.25)', fontSize: '0.72rem', fontWeight: 700, padding: '2px 10px', borderRadius: '12px', color: 'white' }}>Chronological Vault</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h1 style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--text-main)', margin: 0, letterSpacing: '-0.02em' }}>
+                My Medical Health Timeline
+              </h1>
+              <span style={{ 
+                backgroundColor: '#ecfdf5', 
+                border: '1px solid #a7f3d0',
+                fontSize: '0.72rem', 
+                fontWeight: 700, 
+                padding: '3px 10px', 
+                borderRadius: '20px', 
+                color: '#047857' 
+              }}>
+                Chronological Vault
+              </span>
             </div>
-            <p style={{ opacity: 0.9, fontSize: '0.88rem', marginTop: '4px' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '6px', marginBottom: 0 }}>
               A comprehensive chronological audit log of your consultations, report uploads, and prescription orders.
             </p>
           </div>
         </div>
 
-        <button
+        <Button
+          variant="outline"
           onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            backgroundColor: 'white',
-            color: '#0f766e',
-            border: 'none',
-            padding: '12px 20px',
-            borderRadius: '14px',
-            fontSize: '0.88rem',
-            fontWeight: 800,
-            cursor: 'pointer',
-            boxShadow: '0 4px 14px rgba(0,0,0,0.1)'
+            borderRadius: '12px',
+            padding: '10px 18px',
+            fontSize: '0.86rem',
+            fontWeight: 700
           }}
         >
-          {sortOrder === 'desc' ? <ArrowDown size={16} /> : <ArrowUp size={16} />}
+          {sortOrder === 'desc' ? <ArrowDown size={15} /> : <ArrowUp size={15} />}
           Sort: {sortOrder === 'desc' ? 'Newest First' : 'Oldest First'}
-        </button>
+        </Button>
       </div>
 
       <div style={{ position: 'relative', paddingLeft: '32px', display: 'flex', flexDirection: 'column', gap: '32px' }}>

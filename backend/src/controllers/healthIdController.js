@@ -1,5 +1,12 @@
+const crypto = require('crypto');
 const { MongoDb } = require('../services/mongoDbService');
 const { isDatabaseConnected } = require('../config/db');
+const {
+  getClientIp,
+  logEmergencyAudit,
+  recordLookupSuccess,
+  recordLookupFailure
+} = require('../middleware/healthIdSecurityMiddleware');
 
 // Helper to generate a canonical Health ID: JIV-2026-XXXXXX
 const generateRandomId = () => {
@@ -32,6 +39,7 @@ const DEMO_HEALTH_IDS = [
       emergencyNotes: 'Carries emergency beta-blocker prescription in wallet.',
       bloodPressure: '128/84 mmHg'
     },
+    emergencyAccessToken: 'emg_aarav_sharma_7a8b9c0d1e2f3a4b',
     isDemo: true,
     createdAt: '2026-01-15T10:30:00.000Z'
   },
@@ -58,6 +66,7 @@ const DEMO_HEALTH_IDS = [
       emergencyNotes: 'Asthma inhaler as needed.',
       bloodPressure: '118/76 mmHg'
     },
+    emergencyAccessToken: 'emg_meera_nair_9f8e7d6c5b4a3b2a',
     isDemo: true,
     createdAt: '2026-02-20T14:15:00.000Z'
   },
@@ -84,6 +93,7 @@ const DEMO_HEALTH_IDS = [
       emergencyNotes: 'Monitors fasting blood sugar weekly.',
       bloodPressure: '122/80 mmHg'
     },
+    emergencyAccessToken: 'emg_rajesh_varma_1a2b3c4d5e6f7a8b',
     isDemo: true,
     createdAt: '2026-03-01T09:00:00.000Z'
   }
@@ -254,8 +264,10 @@ const createHealthId = async (req, res) => {
     }
 
     const newHealthIdStr = await generateUniqueHealthId();
+    const emergencyAccessToken = 'emg_' + crypto.randomBytes(16).toString('hex');
     const healthIdRecord = await MongoDb.healthIds.create({
       healthId: newHealthIdStr,
+      emergencyAccessToken,
       userId,
       fullName,
       dateOfBirth: dateOfBirth || '2000-01-01',
@@ -272,6 +284,7 @@ const createHealthId = async (req, res) => {
       success: true,
       message: 'Digital Health ID created successfully',
       healthId: healthIdRecord.healthId,
+      emergencyAccessToken: healthIdRecord.emergencyAccessToken || emergencyAccessToken,
       patient: {
         name: healthIdRecord.fullName,
         dateOfBirth: healthIdRecord.dateOfBirth,
@@ -328,9 +341,18 @@ const getMyHealthId = async (req, res) => {
       }
     }
 
+    // Ensure emergencyAccessToken exists on record
+    if (!record.emergencyAccessToken) {
+      record.emergencyAccessToken = 'emg_' + crypto.randomBytes(16).toString('hex');
+      if (typeof record.save === 'function') {
+        await record.save().catch(() => {});
+      }
+    }
+
     return res.status(200).json({
       success: true,
       healthId: record.healthId,
+      emergencyAccessToken: record.emergencyAccessToken,
       patient: {
         name: record.fullName,
         dateOfBirth: record.dateOfBirth,
@@ -357,20 +379,31 @@ const getMyHealthId = async (req, res) => {
 // @route   GET /api/health-id/search?healthId=JIV-2026-XXXXXX
 // @access  Public / Private (Healthcare Professionals & Verified Users)
 const searchHealthId = async (req, res) => {
+  const ip = req.clientIp || getClientIp(req);
   try {
     const rawHealthId = req.query.healthId || req.query.id || req.query.q || req.params.healthId || '';
     const sanitizedHealthId = String(rawHealthId).trim().replace(/^['"]|['"]$/g, '').toUpperCase();
     const alphanumericId = sanitizedHealthId.replace(/[^A-Z0-9]/g, '');
+    const providedToken = String(req.query.token || req.headers['x-emergency-token'] || '').trim();
 
     if (!sanitizedHealthId) {
+      recordLookupFailure(ip);
+      logEmergencyAudit({
+        ip,
+        requestedId: '',
+        tokenProvided: Boolean(providedToken),
+        success: false,
+        status: 400,
+        reason: 'MISSING_HEALTH_ID'
+      });
       return res.status(400).json({
         success: false,
-        message: 'Please provide a valid Health ID to search'
+        error: 'Please provide a valid Health ID to search',
+        errorCode: 'MISSING_HEALTH_ID'
       });
     }
 
     // 1. Check verified demo sample Health IDs first (immediate response without DB dependency)
-    // Priority: Exact match first, alias match, alphanumeric match, and substring match
     let matchedId = null;
     let demoMatch = DEMO_HEALTH_IDS.find((d) => {
       const primaryUpper = d.healthId.toUpperCase();
@@ -415,6 +448,37 @@ const searchHealthId = async (req, res) => {
     }
 
     if (demoMatch) {
+      // Validate emergency lookup token if provided
+      if (providedToken) {
+        const validDemoToken = demoMatch.emergencyAccessToken;
+        if (validDemoToken && providedToken !== validDemoToken) {
+          recordLookupFailure(ip);
+          logEmergencyAudit({
+            ip,
+            requestedId: sanitizedHealthId,
+            tokenProvided: true,
+            success: false,
+            status: 403,
+            reason: 'INVALID_EMERGENCY_TOKEN'
+          });
+          return res.status(403).json({
+            success: false,
+            error: 'Invalid or expired emergency lookup access token.',
+            errorCode: 'INVALID_EMERGENCY_TOKEN'
+          });
+        }
+      }
+
+      recordLookupSuccess(ip);
+      logEmergencyAudit({
+        ip,
+        requestedId: sanitizedHealthId,
+        tokenProvided: Boolean(providedToken),
+        success: true,
+        status: 200,
+        reason: providedToken ? 'TOKEN_AUTHENTICATED' : 'PARAMEDIC_PUBLIC_LOOKUP'
+      });
+
       const returnRecord = {
         ...demoMatch,
         healthId: matchedId || sanitizedHealthId || demoMatch.healthId
@@ -426,7 +490,7 @@ const searchHealthId = async (req, res) => {
     if (isDatabaseConnected()) {
       await seedDemoHealthIds();
 
-      // Safe alphanumeric regex for flexible hyphenation (e.g. JIV-2026-123456 vs JIV2026123456)
+      // Safe alphanumeric regex for flexible hyphenation
       const flexRegex = alphanumericId.length >= 4
         ? new RegExp('^' + alphanumericId.split('').join('[- ]?') + '$', 'i')
         : null;
@@ -441,14 +505,14 @@ const searchHealthId = async (req, res) => {
 
       record = await MongoDb.healthIds.findOne({ $or: idConditions });
 
-      // If not in healthIds collection, check if a registered patient user exists with this healthId
       if (!record) {
         const userMatch = await MongoDb.users.findOne({ $or: idConditions });
         if (userMatch) {
-          // Auto-sync into health_ids collection
           const matchedHid = userMatch.healthId || sanitizedHealthId;
+          const generatedToken = 'emg_' + crypto.randomBytes(16).toString('hex');
           record = await MongoDb.healthIds.create({
             healthId: matchedHid,
+            emergencyAccessToken: generatedToken,
             userId: userMatch._id || userMatch.id,
             fullName: userMatch.name,
             email: userMatch.email || '',
@@ -463,6 +527,7 @@ const searchHealthId = async (req, res) => {
           if (!record) {
             record = {
               healthId: matchedHid,
+              emergencyAccessToken: generatedToken,
               fullName: userMatch.name,
               dateOfBirth: userMatch.dateOfBirth || userMatch.dob || (userMatch.age ? `${new Date().getFullYear() - userMatch.age}-01-01` : '2000-01-01'),
               gender: userMatch.gender || 'Unspecified',
@@ -477,11 +542,53 @@ const searchHealthId = async (req, res) => {
     }
 
     if (!record) {
+      recordLookupFailure(ip);
+      logEmergencyAudit({
+        ip,
+        requestedId: sanitizedHealthId,
+        tokenProvided: Boolean(providedToken),
+        success: false,
+        status: 404,
+        reason: 'NOT_FOUND'
+      });
       return res.status(404).json({
         success: false,
-        message: `Health ID "${sanitizedHealthId}" not found. No patient record registered with this ID.`
+        message: `Health ID "${sanitizedHealthId}" not found. No patient record registered with this ID.`,
+        errorCode: 'HEALTH_ID_NOT_FOUND'
       });
     }
+
+    // Validate emergency lookup token if provided
+    if (providedToken) {
+      const validToken = record.emergencyAccessToken;
+      if (validToken && providedToken !== validToken) {
+        recordLookupFailure(ip);
+        logEmergencyAudit({
+          ip,
+          requestedId: sanitizedHealthId,
+          tokenProvided: true,
+          success: false,
+          status: 403,
+          reason: 'INVALID_EMERGENCY_TOKEN'
+        });
+        return res.status(403).json({
+          success: false,
+          error: 'Invalid or expired emergency lookup access token.',
+          errorCode: 'INVALID_EMERGENCY_TOKEN'
+        });
+      }
+    }
+
+    // Legitimate lookup succeeded
+    recordLookupSuccess(ip);
+    logEmergencyAudit({
+      ip,
+      requestedId: sanitizedHealthId,
+      tokenProvided: Boolean(providedToken),
+      success: true,
+      status: 200,
+      reason: providedToken ? 'TOKEN_AUTHENTICATED' : 'PARAMEDIC_PUBLIC_LOOKUP'
+    });
 
     return res.status(200).json(formatEmergencyPatientResponse(record));
   } catch (error) {

@@ -217,6 +217,12 @@ a:hover {
   }
 }
 
+@media (max-width: 1024px) {
+  .grid-3-mobile {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
 @media (max-width: 768px) {
   .container {
     padding-left: 16px;

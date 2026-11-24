@@ -60,6 +60,7 @@ export interface HealthIdResponse {
   success: boolean;
   message?: string;
   healthId?: string;
+  emergencyAccessToken?: string;
   patient?: HealthIdPatientProfile;
   verificationStatus?: string;
   error?: string;
@@ -93,6 +94,7 @@ export const createHealthIdApi = async (data?: {
     return {
       success: true,
       healthId: result.healthId,
+      emergencyAccessToken: result.emergencyAccessToken,
       patient: result.patient,
       message: result.message
     };
@@ -126,6 +128,7 @@ export const getMyHealthIdApi = async (): Promise<HealthIdResponse> => {
     return {
       success: true,
       healthId: result.healthId,
+      emergencyAccessToken: result.emergencyAccessToken,
       patient: result.patient
     };
   } catch (err: any) {
@@ -136,20 +139,27 @@ export const getMyHealthIdApi = async (): Promise<HealthIdResponse> => {
 
 // 3. Search and verify any Health ID against MongoDB
 export const searchHealthIdApi = async (
-  healthIdQuery: string
+  healthIdQuery: string,
+  token?: string
 ): Promise<HealthIdResponse> => {
   try {
     const cleanQuery = encodeURIComponent((healthIdQuery || "").trim());
+    let url = `/api/health-id/search?healthId=${cleanQuery}`;
+    if (token && token.trim()) {
+      url += `&token=${encodeURIComponent(token.trim())}`;
+    }
 
-    const response = await fetchWithFallback(
-      `/api/health-id/search?healthId=${cleanQuery}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json"
+    };
+    if (token && token.trim()) {
+      headers["x-emergency-token"] = token.trim();
+    }
+
+    const response = await fetchWithFallback(url, {
+      method: "GET",
+      headers,
+    });
 
     const result = await response.json();
 
@@ -157,9 +167,14 @@ export const searchHealthIdApi = async (
       return {
         success: false,
         message:
+          result.error ||
           result.message ||
           (response.status === 404
             ? "Health ID not found"
+            : response.status === 429
+            ? "Rate limit or verification lockout active"
+            : response.status === 403
+            ? "Invalid emergency lookup access token"
             : "Health ID verification failed"),
       };
     }

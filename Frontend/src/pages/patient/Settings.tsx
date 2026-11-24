@@ -71,12 +71,6 @@ export const PatientSettings: React.FC = () => {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [toastMsg, setToastMsg] = useState('');
 
-  // HIPAA Access Logs
-  const securityAuditLogs = [
-    { time: '18 Aug 2026 14:30', entity: 'Dr. Anand Sen (Cardiologist)', action: 'Viewed Comprehensive Blood Count Report', status: 'AUTHORIZED' },
-    { time: '12 Aug 2026 11:15', entity: 'Jivexa Central Pharmacy', action: 'Verified Amoxicillin 250mg Doctor Prescription', status: 'AUTHORIZED' },
-    { time: '04 Aug 2026 09:00', entity: 'System Encryption Service', action: 'HIPAA 256-bit AES Vault Key Rotation', status: 'COMPLETED' }
-  ];
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,7 +87,7 @@ export const PatientSettings: React.FC = () => {
     await new Promise((resolve) => setTimeout(resolve, 800));
 
     setIsUpdatingPass(false);
-    setToastMsg('🔐 Password changed & 256-bit AES master key updated!');
+    setToastMsg('🔐 Password updated successfully.');
     setPassForm({ current: '', new: '', confirm: '' });
   };
 
@@ -145,7 +139,7 @@ export const PatientSettings: React.FC = () => {
       },
       healthRecordsCount: healthRecords.length,
       appointmentsCount: appointments.length,
-      encryptedVaultSignature: 'AES-256-GCM-884920'
+      dataVaultExportVersion: 'JIVEXA-SECURE-V2'
     };
 
     const blob = new Blob([JSON.stringify(dataObj, null, 2)], { type: 'application/json' });
@@ -164,7 +158,7 @@ export const PatientSettings: React.FC = () => {
   const handleDeleteAccount = () => {
     if (deleteConfirmText.toLowerCase() === 'delete') {
       setIsDeleteOpen(false);
-      alert('Your account is being scheduled for deletion in compliance with HIPAA records duration requirements.');
+      alert('Your account is being scheduled for deletion in compliance with account data retention guidelines.');
       logout();
     }
   };
@@ -172,40 +166,56 @@ export const PatientSettings: React.FC = () => {
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '28px' }}>
       
-      {/* BRAND HEADER BANNER */}
+      {/* CLINICAL SECURITY HERO BANNER */}
       <div style={{
-        background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 50%, #10b981 100%)',
-        borderRadius: '24px',
-        padding: '32px 36px',
-        color: 'white',
-        boxShadow: '0 12px 30px -8px rgba(15, 118, 110, 0.4)',
+        backgroundColor: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '18px',
+        padding: '28px 32px',
+        boxShadow: '0 2px 8px -2px rgba(15, 23, 42, 0.05)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         flexWrap: 'wrap',
-        gap: '20px'
+        gap: '24px',
+        position: 'relative',
+        overflow: 'hidden'
       }}>
+        {/* Subtle accent bar on the top edge */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #059669 0%, #0d9488 50%, #10b981 100%)' }} />
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <div style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '50%',
-            backgroundColor: 'rgba(255, 255, 255, 0.2)',
-            border: '2px solid rgba(255, 255, 255, 0.4)',
+            width: '56px',
+            height: '56px',
+            borderRadius: '14px',
+            backgroundColor: 'var(--primary-light)',
+            color: 'var(--primary)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'white',
-            backdropFilter: 'blur(10px)'
+            flexShrink: 0
           }}>
-            <Lock size={32} />
+            <Lock size={28} />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'white' }}>Account & Security Command Center</h1>
-              <span style={{ backgroundColor: 'rgba(255, 255, 255, 0.25)', fontSize: '0.72rem', fontWeight: 700, padding: '2px 10px', borderRadius: '12px', color: 'white' }}>HIPAA 256-bit AES Protected</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h1 style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--text-main)', margin: 0, letterSpacing: '-0.02em' }}>
+                Account & Security Command Center
+              </h1>
+              <span style={{ 
+                backgroundColor: '#ecfdf5', 
+                border: '1px solid #a7f3d0',
+                fontSize: '0.72rem', 
+                fontWeight: 700, 
+                padding: '3px 10px', 
+                borderRadius: '20px', 
+                color: '#047857' 
+              }}>
+                TLS 1.3 & Encrypted Storage
+              </span>
             </div>
-            <p style={{ opacity: 0.9, fontSize: '0.88rem', marginTop: '4px' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '6px', marginBottom: 0 }}>
               Manage multi-factor authentication, device access sessions, emergency QR passes, and encrypted health exports.
             </p>
           </div>
@@ -213,20 +223,19 @@ export const PatientSettings: React.FC = () => {
 
         <div style={{ display: 'flex', gap: '12px' }}>
           <Button 
+            variant="outline"
             onClick={() => setIsQrModalOpen(true)}
             style={{
-              backgroundColor: 'white',
-              color: '#0f766e',
-              borderRadius: '14px',
-              padding: '12px 20px',
-              fontWeight: 800,
+              borderRadius: '12px',
+              padding: '10px 18px',
+              fontSize: '0.86rem',
+              fontWeight: 700,
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '8px',
-              boxShadow: '0 4px 14px rgba(0,0,0,0.1)'
+              gap: '8px'
             }}
           >
-            <QrCode size={18} />
+            <QrCode size={16} />
             Emergency Health QR Pass
           </Button>
         </div>

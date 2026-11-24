@@ -199,3 +199,80 @@ export const updatePrescriptionApi = async (
     return { success: false, error: err.message || 'Connection error' };
   }
 };
+
+// ==========================================
+// 6. MEDICAL REPORT VAULT API CLIENT
+// ==========================================
+
+export const getMedicalReportsApi = async (): Promise<{ success: boolean; count?: number; reports?: any[]; error?: string }> => {
+  try {
+    const backendUrl = getBackendUrl();
+    const res = await fetchJson(`${backendUrl}/api/ai/reports`, {
+      method: 'GET',
+      headers: getAuthHeaders()
+    });
+
+    if (!res.ok) {
+      return { success: false, error: res.data?.error || 'Failed to fetch medical reports' };
+    }
+
+    return { success: true, count: res.data.count, reports: res.data.reports || [] };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Connection error' };
+  }
+};
+
+export const getMedicalReportByIdApi = async (id: string): Promise<{ success: boolean; report?: any; error?: string }> => {
+  try {
+    const backendUrl = getBackendUrl();
+    const res = await fetchJson(`${backendUrl}/api/ai/reports/${id}`, {
+      method: 'GET',
+      headers: getAuthHeaders()
+    });
+
+    if (!res.ok) {
+      return { success: false, error: res.data?.error || 'Failed to fetch medical report' };
+    }
+
+    return { success: true, report: res.data.report };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Connection error' };
+  }
+};
+
+export const saveMedicalReportApi = async (reportData: any): Promise<{ success: boolean; report?: any; error?: string }> => {
+  try {
+    const backendUrl = getBackendUrl();
+    const res = await fetchJson(`${backendUrl}/api/ai/reports`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(reportData)
+    });
+
+    if (!res.ok) {
+      return { success: false, error: res.data?.error || 'Failed to save medical report' };
+    }
+
+    return { success: true, report: res.data.report };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Connection error' };
+  }
+};
+
+export const deleteMedicalReportApi = async (id: string): Promise<{ success: boolean; error?: string; deletedReportId?: string }> => {
+  try {
+    const backendUrl = getBackendUrl();
+    const res = await fetchJson(`${backendUrl}/api/ai/reports/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+
+    if (!res.ok) {
+      return { success: false, error: res.data?.error || 'Failed to delete medical report' };
+    }
+
+    return { success: true, deletedReportId: res.data.deletedReportId };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Connection error' };
+  }
+};

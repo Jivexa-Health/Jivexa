@@ -39,7 +39,7 @@ export const Input: React.FC<InputProps> = ({
             paddingRight: isPasswordField ? '42px' : '14px',
             paddingTop: '10px',
             paddingBottom: '10px',
-            borderRadius: 'var(--radius-md)',
+            borderRadius: '10px',
             border: error ? '1.5px solid var(--error)' : '1px solid var(--border)',
             fontSize: '0.92rem',
             fontFamily: 'var(--font-sans)',

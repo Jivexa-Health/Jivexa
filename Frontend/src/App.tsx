@@ -48,6 +48,7 @@ import {
 
 // Patient platform views
 import { PatientDashboard } from './pages/patient/Dashboard';
+import { PatientHealthIdPage } from './pages/patient/HealthIdPage';
 import { AIAssistantChat } from './pages/patient/AIAssistant';
 import { AIReportAnalyzer } from './pages/patient/AIReportAnalyzer';
 import { PatientProfileEdit } from './pages/patient/Profile';
@@ -364,6 +365,28 @@ export const App: React.FC = () => {
               <ProtectedRoute allowedRoles={['PATIENT']}>
                 <DashboardLayout>
                   <PatientDashboard />
+                </DashboardLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/patient/health-id"
+            element={
+              <ProtectedRoute allowedRoles={['PATIENT']}>
+                <DashboardLayout>
+                  <PatientHealthIdPage />
+                </DashboardLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/patient/jhid"
+            element={
+              <ProtectedRoute allowedRoles={['PATIENT']}>
+                <DashboardLayout>
+                  <PatientHealthIdPage />
                 </DashboardLayout>
               </ProtectedRoute>
             }

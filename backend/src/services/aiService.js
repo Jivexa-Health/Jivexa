@@ -19,6 +19,12 @@ const {
   STANDARD_REFUSAL_MESSAGE,
   STANDARD_AMBIGUOUS_CLARIFICATION
 } = require('./healthGuardrail');
+const { executeClinicalAiPipeline } = require('./medicalAi/clinicalAiEngine');
+const { 
+  screenEmergency, 
+  buildEmergencyStructuredResponse 
+} = require('./medicalAi/medicalSafetyEngine');
+const { formatStructuredToMarkdown } = require('./medicalAi/structuredResponseFormatter');
 
 // ==============================================================================
 // DOCTOR-STYLE CLINICAL ASSISTANT SYSTEM INSTRUCTION
@@ -1168,6 +1174,39 @@ const CLINICAL_PARAMETER_RULES = [
     }
   },
   {
+    name: 'Serum Bilirubin (Direct)',
+    category: 'Liver Function',
+    pattern: /(?:direct\s*bilirubin|bilirubin\s*direct).*?[:=]?\s*([0-9\.]+)\s*(mg\/dl)?.*?(\((.*?)\))?/i,
+    unit: 'mg/dL',
+    defaultRange: '0.0 - 0.3 mg/dL',
+    evaluate: (val, ref) => {
+      const num = parseFloat(val);
+      const parsed = parseReferenceRange(ref);
+      const max = parsed?.max ?? 0.3;
+      let status = num > max ? 'Above Range' : 'Within Reference Range';
+      let flag = num > max ? 'HIGH' : 'NORMAL';
+      let legacyStatus = num > max ? 'Abnormal' : 'Normal';
+      return { status, flag, legacyStatus, refRange: ref || '0.0 - 0.3 mg/dL', refMin: 0.0, refMax: max, explanation: `Direct bilirubin (${num} mg/dL) is ${status === 'Above Range' ? 'elevated; biliary/hepatic evaluation advised' : 'within normal range'}.` };
+    }
+  },
+  {
+    name: 'Alkaline Phosphatase (ALP)',
+    category: 'Liver Function',
+    pattern: /(?:alkaline\s*phosphatase|\balp\b).*?[:=]?\s*([0-9\.]+)\s*(u\/l|iu\/l)?.*?(\((.*?)\))?/i,
+    unit: 'U/L',
+    defaultRange: '44 - 147 U/L',
+    evaluate: (val, ref) => {
+      const num = parseFloat(val);
+      const parsed = parseReferenceRange(ref);
+      const min = parsed?.min ?? 44;
+      const max = parsed?.max ?? 147;
+      let status = num > max ? 'Above Range' : num < min ? 'Below Range' : 'Within Reference Range';
+      let flag = num > max ? 'HIGH' : num < min ? 'LOW' : 'NORMAL';
+      let legacyStatus = status === 'Within Reference Range' ? 'Normal' : 'Attention';
+      return { status, flag, legacyStatus, refRange: ref || '44 - 147 U/L', refMin: min, refMax: max, explanation: `ALP (${num} U/L) is ${status.toLowerCase()}.` };
+    }
+  },
+  {
     name: 'SGPT / ALT',
     category: 'Liver Function',
     pattern: /(?:\bsgpt\b|\balt\b|alanine\s*aminotransferase).*?[:=]?\s*([0-9\.]+)\s*(u\/l|iu\/l)?.*?(\((.*?)\))?/i,
@@ -1393,7 +1432,7 @@ const extractClinicalParameters = (text, sourcePage = 1) => {
  * Official Google Gemini models in priority order for dynamic fallback cascade.
  * Ensures high availability, zero downtime, and compatibility with Google's API.
  */
-const OFFICIAL_GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash'];
+const OFFICIAL_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 
 /**
  * Resolves candidate models for resilient fallback execution.
@@ -1819,7 +1858,8 @@ const isTransientError = (err) => {
       msg.includes('timed out') || msg.includes('timeout') ||
       msg.includes('econnreset') || msg.includes('etimedout') ||
       msg.includes('fetch failed') || msg.includes('network') ||
-      msg.includes('socket hang up') || msg.includes('unavailable')) {
+      msg.includes('socket hang up') || msg.includes('unavailable') ||
+      msg.includes('failed to parse stream')) {
     return true;
   }
 
@@ -2077,8 +2117,8 @@ Return ONLY valid JSON matching this structure:
     } catch (geminiErr) {
       lastReportAnalysisError = geminiErr;
       const errMsg = String(geminiErr?.message || '');
-      if (geminiErr?.status === 404 || errMsg.includes('404') || errMsg.includes('not found') || errMsg.includes('is not supported')) {
-        console.warn(`[Report Analyzer AI] Model ${modelName} unavailable on API. Cascading to next candidate...`);
+      if (geminiErr?.status === 404 || errMsg.includes('404') || errMsg.includes('not found') || errMsg.includes('is not supported') || isTransientError(geminiErr)) {
+        console.warn(`[Report Analyzer AI] Model ${modelName} transiently failed or unavailable on API. Cascading to next candidate...`);
         continue;
       }
       break;
@@ -2179,13 +2219,16 @@ const streamGeneralChatbot = async (userMessage, history = [], onChunk = () => {
   // A. Emergency Triage (108 / 112)
   if (classification.status === 'EMERGENCY') {
     aiMetrics.emergencyDetections++;
-    const emergencyText = classification.refusalMessage;
+    const emergencyTriage = screenEmergency(cleanMessage, userProfile);
+    const emergencyStructured = buildEmergencyStructuredResponse(emergencyTriage, cleanMessage);
+    const emergencyText = formatStructuredToMarkdown(emergencyStructured);
     onChunk(emergencyText);
     return {
-      provider: 'JIVEXA Emergency Guardrail',
+      provider: 'JIVEXA Emergency Safety Engine',
       isEmergency: true,
       text: emergencyText,
-      suggestions: [],
+      structuredData: emergencyStructured,
+      suggestions: emergencyStructured.follow_up_questions || [],
       inputTokens: estimateTokens(cleanMessage),
       outputTokens: estimateTokens(emergencyText)
     };
@@ -2238,15 +2281,20 @@ const streamGeneralChatbot = async (userMessage, history = [], onChunk = () => {
   }
 
   // --------------------------------------------------------------------------
-  // LAYER 3 & 4: Primary Google Gemini Engine + Output Integrity Guardrail
+  // LAYER 3 & 4: Clinical AI Response Engine (Intent, Safety, Pharmacology, Zod Schema)
   // --------------------------------------------------------------------------
   try {
-    const geminiResult = await streamGemini(cleanMessage, history, onChunk, userProfile, crossConversationContext, reportContext);
-    const suggestions = predictFollowupQuestions(cleanMessage, geminiResult.text, history);
-    return {
-      ...geminiResult,
-      suggestions
-    };
+    const clinicalResult = await executeClinicalAiPipeline({
+      userMessage: cleanMessage,
+      history,
+      onChunk,
+      userProfile,
+      crossConversationContext,
+      reportContext
+    });
+
+    aiMetrics.geminiSuccesses++;
+    return clinicalResult;
   } catch (geminiErr) {
     const errorDetails = categorizeAndLogGeminiError(geminiErr, 'Chatbot A (General Health)');
     aiMetrics.errors++;
@@ -2314,7 +2362,7 @@ const streamReportChatbot = async (userMessage, history = [], reportContext = nu
     return {
       provider: 'JIVEXA Report Assistant',
       text: noReportMsg,
-      errorCode: 'NO_REPORT_CONTEXT',
+      errorCode: 'WAITING_FOR_REPORT',
       inputTokens: estimateTokens(cleanMessage),
       outputTokens: 25
     };
@@ -2326,7 +2374,7 @@ const streamReportChatbot = async (userMessage, history = [], reportContext = nu
     return {
       provider: 'JIVEXA Report Assistant',
       text: noParamsMsg,
-      errorCode: 'NO_REPORT_CONTEXT',
+      errorCode: 'WAITING_FOR_REPORT',
       inputTokens: estimateTokens(cleanMessage),
       outputTokens: 25
     };

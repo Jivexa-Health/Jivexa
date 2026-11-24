@@ -63,6 +63,8 @@ export const sendReportChatMessage = async (
       body: JSON.stringify({
         message: userQuery,
         reportContext: {
+          id: reportContext.reportId || (reportContext as any).id,
+          reportId: reportContext.reportId || (reportContext as any).id,
           reportTitle: reportContext.reportTitle,
           reportDate: reportContext.reportDate,
           healthScore: reportContext.healthScore,
@@ -76,7 +78,7 @@ export const sendReportChatMessage = async (
           })),
           longitudinalContext: (reportContext as any).longitudinalContext || ''
         },
-        conversationId: `report_${reportContext.reportId || reportContext.id || Date.now()}`
+        conversationId: `report_${reportContext.reportId || (reportContext as any).id || Date.now()}`
       })
     });
 
@@ -118,6 +120,27 @@ export const sendReportChatMessage = async (
           provider
         };
       }
+    } else if (res.status === 403) {
+      let errDetail = 'You are not authorized to access or query this medical report.';
+      try {
+        const errJson = await res.json();
+        if (errJson.error) errDetail = errJson.error;
+      } catch (e) {}
+      return {
+        id: `msg_rep_err_${Date.now()}`,
+        sender: 'ai',
+        text: `🔒 Access Denied: ${errDetail}`,
+        timestamp,
+        provider: 'JIVEXA Security Guardrail'
+      };
+    } else if (res.status === 401) {
+      return {
+        id: `msg_rep_err_${Date.now()}`,
+        sender: 'ai',
+        text: '⚠️ Authentication Required: Please log in to your patient account to consult with the JIVEXA Report Assistant.',
+        timestamp,
+        provider: 'JIVEXA Security Guardrail'
+      };
     } else if (res.status === 503) {
       return {
         id: `msg_rep_err_${Date.now()}`,

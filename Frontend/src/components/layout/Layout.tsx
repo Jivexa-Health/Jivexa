@@ -285,6 +285,7 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
   const sidebarLinks: Record<string, { label: string; path: string; icon: React.ReactNode; comingSoon?: boolean }[]> = {
     PATIENT: isMvp ? [
       { label: 'Dashboard', path: '/patient/dashboard', icon: <Home size={18} /> },
+      { label: 'Digital Health ID', path: '/patient/health-id', icon: <ShieldCheck size={18} /> },
       { label: 'JIVEXA Health AI', path: '/patient/ai-assistant', icon: <MessageSquare size={18} /> },
       { label: 'AI Report Analyzer', path: '/patient/ai-report-analyzer', icon: <FileText size={18} /> },
       { label: 'My Health Profile', path: '/patient/profile', icon: <UserIcon size={18} /> },
@@ -293,6 +294,7 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
       { label: 'Settings', path: '/patient/settings', icon: <Settings size={18} /> },
     ] : [
       { label: 'Dashboard', path: '/patient/dashboard', icon: <Home size={18} /> },
+      { label: 'Digital Health ID', path: '/patient/health-id', icon: <ShieldCheck size={18} /> },
       { label: 'JIVEXA Health AI Bot', path: '/patient/ai-assistant', icon: <MessageSquare size={18} /> },
       { label: 'AI Medical Report Analyzer', path: '/patient/ai-report-analyzer', icon: <FileText size={18} /> },
       { label: 'My Health Profile', path: '/patient/profile', icon: <UserIcon size={18} /> },
@@ -357,17 +359,17 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
           </span>
         </div>
 
-        <div style={{ padding: 'var(--space-md)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: '1.1rem' }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: 'var(--surface-raised)' }}>
+          <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1rem', boxShadow: '0 2px 8px rgba(5, 150, 105, 0.25)' }}>
             <span style={{ margin: 'auto' }}>{user?.name.charAt(0)}</span>
           </div>
           <div style={{ overflow: 'hidden' }}>
-            <h5 style={{ fontSize: '0.9rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{user?.name}</h5>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{user?.email}</span>
+            <h5 style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-main)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{user?.name}</h5>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{user?.email}</span>
           </div>
         </div>
 
-        <nav style={{ flex: 1, padding: 'var(--space-md)', display: 'flex', flexDirection: 'column', gap: '4px', overflowY: 'auto' }}>
+        <nav style={{ flex: 1, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: '3px', overflowY: 'auto' }}>
           {activeLinks.map((link) => {
             const isActive = location.pathname === link.path;
             return (
@@ -378,11 +380,13 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
                   display: 'flex',
                   alignItems: 'center',
                   gap: '12px',
-                  padding: '10px 14px',
-                  borderRadius: 'var(--radius-sm)',
-                  color: isActive ? 'var(--primary)' : 'var(--text-muted)',
+                  padding: '9px 12px',
+                  borderRadius: '10px',
+                  color: isActive ? '#047857' : 'var(--text-muted)',
                   backgroundColor: isActive ? 'var(--primary-light)' : 'transparent',
-                  fontWeight: isActive ? 600 : 500,
+                  borderLeft: isActive ? '3px solid var(--primary)' : '3px solid transparent',
+                  fontWeight: isActive ? 650 : 500,
+                  boxShadow: isActive ? '0 1px 3px rgba(5, 150, 105, 0.08)' : 'none',
                   transition: 'all var(--transition-fast)'
                 }}
               >
@@ -453,8 +457,14 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
             <BrandLogo size="sm" />
           </div>
 
-          <div className="sr-mobile-hide" style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-            Secure Health Ecosystem
+          <div className="sr-mobile-hide" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', boxShadow: '0 0 6px rgba(16, 185, 129, 0.6)' }} />
+            <span style={{ fontWeight: 650, color: 'var(--text-main)', fontSize: '0.90rem', letterSpacing: '-0.01em' }}>
+              JIVEXA Health Operating System
+            </span>
+            <span style={{ fontSize: '0.68rem', fontWeight: 700, backgroundColor: 'var(--primary-light)', color: 'var(--primary)', border: '1px solid rgba(5, 150, 105, 0.2)', padding: '2px 8px', borderRadius: '12px' }}>
+              {isMvp ? 'Patient Health MVP' : 'Clinical Health OS'}
+            </span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -553,11 +563,11 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
               )}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--primary)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: '0.9rem' }} className="sr-mobile-flex">
-                <span style={{ margin: 'auto' }}>{user?.name.charAt(0)}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 10px 3px 4px', borderRadius: '20px', border: '1px solid var(--border)', backgroundColor: 'var(--surface)', boxShadow: 'var(--shadow-sm)' }}>
+              <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.8rem', boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)' }}>
+                <span>{user?.name.charAt(0)}</span>
               </div>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }} className="sr-mobile-hide">
+              <span style={{ fontSize: '0.82rem', fontWeight: 650, color: 'var(--text-main)' }} className="sr-mobile-hide">
                 {user?.name}
               </span>
             </div>
