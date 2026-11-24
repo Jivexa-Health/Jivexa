@@ -1,196 +1,318 @@
-# Jivexa Health OS
+# 🏥 JIVEXA Health OS
+### AI-Powered Health. Connected Care.
 
-[![Live Demo](https://img.shields.io/badge/Live_App-frontend--beryl--two--18.vercel.app-0070f3?style=for-the-badge&logo=vercel&logoColor=white)](https://jivexa-main.vercel.app/)
-[![GitHub](https://img.shields.io/badge/GitHub-jivexa--ai/Jivexa--main-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/jivexa-ai/Jivexa-main)
+<p align="center">
+  <strong>Building the Future of Connected Healthcare</strong>
+</p>
 
-A connected health platform built to bring patients, doctors, pharmacies, emergency ambulance dispatches, and ABHA health records into one simple place.
-
-👉 **Try the Live App:** [https://frontend-beryl-two-18.vercel.app](https://frontend-beryl-two-18.vercel.app)
-
----
-
-## What is Jivexa?
-
-Healthcare is often fragmented. Paper prescriptions get lost, emergency ambulances operate without sending patient data ahead to hospitals, and patients struggle to understand complex lab test reports.
-
-**Jivexa Health OS** fixes this by connecting all 5 key healthcare roles under one roof:
-- **Patients** get 24/7 AI health guidance, lab report PDF summaries, and digital record vaults.
-- **Doctors** get a clean dashboard for patient queues, consultation notes, and digital prescriptions.
-- **Pharmacies** get real-time medicine stock checks and digital order fulfillment.
-- **Ambulance Partners** get live GPS emergency dispatches with pre-hospital patient vitals streaming.
-- **Admins** get onboarding verification and system health checks.
+<p align="center">
+  <a href="https://jivexa-mvp.vercel.app/">Live Website</a> •
+  <a href="https://jivexa-main.onrender.com/">Backend API</a> •
+  <a href="https://jivexa-main.onrender.com/">Backend Health</a>
+</p>
 
 ---
 
-## 🎨 System Flowcharts & Diagrams
+## 🚀 About JIVEXA
 
-### 1. Main Patient Healthcare Journey
+**JIVEXA Health OS** is an AI-powered digital healthcare platform designed to make healthcare more accessible, connected, and organized.
+
+JIVEXA aims to bring patients, healthcare professionals, medical records, AI-powered health assistance, and emergency healthcare services together in one connected digital ecosystem.
+
+Our vision is to simplify healthcare access through technology, intelligent health insights, and connected care infrastructure.
+
+**Project:** JIVEXA Health OS  
+**Founder & CEO:** Mayank Gangwar  
+**Industry:** HealthTech / Artificial Intelligence  
+**Product Stage:** Pre-MVP / Patient MVP  
+**Platform:** Web Application
+
+## 🌐 Live Platform
+
+| Component | URL |
+|---|---|
+| Frontend Application | https://jivexa-mvp.vercel.app/ |
+| Backend Service | https://jivexa-main.onrender.com/ |
+| Backend Health Check | https://jivexa-main.onrender.com/ |
+
+## ✨ Key Features
+
+### 1. Patient Dashboard
+- Centralized patient dashboard.
+- Patient profile management.
+- Health information overview.
+- Access to available healthcare features.
+
+### 2. JHID – JIVEXA Health ID
+- Digital health identity concept.
+- Unique health identification.
+- Emergency health information access.
+- Designed to support connected healthcare records.
+
+### 3. AI Health Assistant
+- AI-powered health information assistance.
+- Health-related question answering.
+- Conversational AI interface.
+- Designed to improve healthcare awareness.
+
+### 4. AI Medical Report Analyzer
+- AI-assisted medical report interpretation.
+- Simplified explanations of medical terminology.
+- Health report insights.
+- Designed to help patients better understand their reports.
+
+### 5. Digital Health Records
+- Centralized health record management.
+- Health history organization.
+- Patient-focused digital health information.
+
+### 6. Connected Healthcare Ecosystem
+
+Planned ecosystem modules:
+
+- Doctor Platform
+- Pharmacy Integration
+- Ambulance Services
+- Emergency Healthcare Support
+- Connected Healthcare Administration
+
+*Availability of individual modules depends on the current development stage.*
+
+## 🧠 Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React / Vite |
+| Backend | Node.js |
+| API | REST API |
+| Database | MongoDB Atlas |
+| AI Integration | Google Gemini |
+| Authentication | JWT |
+| Frontend Hosting | Vercel |
+| Backend Hosting | Render |
+| Version Control | Git & GitHub |
+
+## 🏗️ System Architecture
 
 ```text
-+-----------------------------------------------------------------------------------+
-|  PATIENT HEALTH JOURNEY                                                           |
-+-----------------------------------------------------------------------------------+
-|                                                                                   |
-|  [ Patient Symptoms / Lab PDF ]                                                   |
-|                │                                                                  |
-|                ▼                                                                  |
-|  [ 24/7 AI Health Bot & Triage ] ────► Extracts Lab Values & Scores Risk          |
-|                │                                                                  |
-|                ▼                                                                  |
-|  [ Book Doctor Consultation ]   ────► Doctor Reviews AI Notes & Issues Prescription|
-|                │                                                                  |
-|                ▼                                                                  |
-|  [ Pharmacy Stock Check ]       ────► 1-Tap Order Fulfillment                     |
-|                │                                                                  |
-|                ▼                                                                  |
-|  [ ABHA 14-Digit Health Vault ] ────► Encrypted Lifetime History Storage          |
-|                                                                                   |
-+-----------------------------------------------------------------------------------+
+                JIVEXA HEALTH OS
+                       |
+              Frontend Application
+                       |
+                  Vercel
+                       |
+                 REST API
+                       |
+                Node.js Backend
+                       |
+          +------------+------------+
+          |            |            |
+       MongoDB       Gemini       Auth
+       Atlas           AI         JWT
+          |            |            |
+          +------------+------------+
+                       |
+              Patient Experience
 ```
 
----
-
-### 2. Emergency Ambulance Dispatch & Pre-Hospital ICU Sync
+## 📂 Project Structure
 
 ```text
-+-----------------------------------------------------------------------------------+
-|  EMERGENCY RADAR FLOW                                                             |
-+-----------------------------------------------------------------------------------+
-|                                                                                   |
-|  [ 1. Patient Triggers 108 Emergency ]                                            |
-|                  │                                                                |
-|                  ▼                                                                |
-|  [ 2. Nearest GPS Ambulance Dispatched ] ──► Real-time route tracking on map      |
-|                  │                                                                |
-|                  ▼                                                                |
-|  [ 3. Pre-Hospital Vitals Streaming ]    ──► Live data sent directly to ICU       |
-|                  │                                                                |
-|                  ▼                                                                |
-|  [ 4. Hospital ICU Prepared Before Arrival ]                                      |
-|                                                                                   |
-+-----------------------------------------------------------------------------------+
+Jivexa/
+│
+├── frontend/
+│   ├── src/
+│   ├── public/
+│   ├── package.json
+│   └── vite.config.js
+│
+├── backend/
+│   ├── src/
+│   │   ├── config/
+│   │   ├── controllers/
+│   │   ├── models/
+│   │   ├── routes/
+│   │   ├── middleware/
+│   │   └── server.js
+│   │
+│   └── package.json
+│
+├── README.md
+└── .gitignore
 ```
 
----
+*The structure above describes the intended major project areas; individual files may vary across versions.*
 
-### 3. AI PDF Lab Report Analyzer Workflow
-
-```text
-+-----------------------------------------------------------------------------------+
-|  AI LAB REPORT PARSER FLOW                                                        |
-+-----------------------------------------------------------------------------------+
-|                                                                                   |
-|  [ Upload PDF / Image Report ] ──► (CBC, Lipid, Metabolic, Diabetes Panels)       |
-|                 │                                                                 |
-|                 ▼                                                                 |
-|  [ Multi-Model Groq AI Engine ] ──► Sub-second clinical parameter extraction      |
-|                 │                                                                 |
-|                 ▼                                                                 |
-|  [ Plain English / Hindi Summary ] ──► High/Low flags & actionable recommendations |
-|                 │                                                                 |
-|                 ▼                                                                 |
-|  [ 1-Click Share with Doctor ]  ──► Attached to next consultation note            |
-|                                                                                   |
-+-----------------------------------------------------------------------------------+
-```
-
----
-
-### 4. 5-Role Interconnected Ecosystem
-
-```mermaid
-flowchart TD
-    subgraph ROLES ["Jivexa 5-Role Platform"]
-        P[Patient]
-        D[Doctor]
-        PH[Pharmacy]
-        AMB[Ambulance Dispatch]
-        ADM[Admin Platform]
-    end
-
-    subgraph ENGINE ["Jivexa Core Engine"]
-        AI[24/7 Groq AI Health Bot]
-        PARSER[PDF Report Parser]
-        VAULT[ABHA 14-Digit Vault]
-        RADAR[Emergency GPS Radar]
-    end
-
-    P --> AI & PARSER & VAULT & RADAR
-    D --> P & VAULT
-    PH --> P & D
-    AMB --> P & RADAR
-    ADM --> D & PH
-```
-
----
-
-## ⚡ Main Features
-
-1. **24/7 AI Health Assistant**  
-   Runs on a live Groq multi-model failover server (`groq/compound`, `gpt-oss-20b`, `qwen3.6-27b`). Gives instant health advice with strict safety guardrails. Users get 1,000 free tokens every 6 hours, and website guide queries are always 100% free.
-
-2. **AI Lab Report Parser**  
-   Upload any blood test PDF or lab image. It parses key values like Hemoglobin, Cholesterol, and HbA1c, explaining what they mean in plain text. (Limited to 5 PDFs per 24 hours).
-
-3. **Emergency Ambulance Radar**  
-   Live GPS ambulance dispatch that streams patient vitals to the destination hospital ICU before the patient arrives.
-
-4. **ABHA Health Vault Integration**  
-   Connects with 14-digit national ABHA health IDs so patients can securely store and share their lifetime medical history.
-
-5. **Field-Level Form Validation**  
-   Strict Zod checks on signup (name length, valid email format, strong passwords with uppercase, lowercase, numbers, and special symbols).
-
----
-
-## 💻 Tech Stack
-
-- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, Lucide Icons
-- **Backend API:** Node.js, Express, Zod, JWT, Cookie Parser
-- **AI Models:** Groq Live Server API (`groq/compound`, `gpt-oss-20b`, `qwen`)
-- **Database & Vault:** MongoDB, Mongoose, ABHA 14-Digit Vault Sync
-- **Deployment:** Vercel Edge Production (`frontend-beryl-two-18.vercel.app`)
-
----
-
-## 🚀 How to Run Locally
+## ⚙️ Local Installation
 
 ### Prerequisites
-- Node.js (v18 or higher)
-- npm
 
-### 1. Clone repo
+Install the following:
+
+- Node.js
+- npm
+- Git
+- MongoDB Atlas account
+- Google Gemini API access (for AI features)
+
+### Step 1: Clone Repository
+
 ```bash
-git clone https://github.com/jivexa-ai/Jivexa-main.git
-cd Jivexa-main
+git clone https://github.com/Jivexa-Health/Jivexa-Health-.git
 ```
 
-### 2. Run Backend
+```bash
+cd Jivexa-Health-
+```
+
+### Step 2: Install Backend Dependencies
+
 ```bash
 cd backend
 npm install
-npm run dev
 ```
 
-### 3. Run Frontend
-Open a new terminal window:
+### Step 3: Configure Environment Variables
+
+Create a `.env` file inside the backend directory.
+
+```env
+PORT=4000
+NODE_ENV=development
+
+MONGO_URI=your_mongodb_connection_string
+
+JWT_SECRET=your_secure_jwt_secret
+
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+Replace the example values with your own credentials.
+
+Never upload your `.env` file to GitHub.
+
+### Step 4: Start Backend
+
 ```bash
-cd Frontend
+node src/server.js
+```
+
+Backend will run on:
+
+```text
+http://localhost:4000
+```
+
+### Step 5: Install Frontend Dependencies
+
+Open another terminal:
+
+```bash
+cd frontend
 npm install
+```
+
+### Step 6: Start Frontend
+
+```bash
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser.
+Open:
+
+```text
+http://localhost:5173
+```
+
+## ☁️ Deployment Architecture
+
+### Frontend – Vercel
+
+Live deployment:
+
+https://jivexa-mvp.vercel.app/
+
+### Backend – Render
+
+Backend service:
+
+https://jivexa-main.onrender.com/
+
+### Database – MongoDB Atlas
+
+JIVEXA uses MongoDB Atlas for cloud database connectivity.
+
+Production environment variables must be configured securely in the hosting dashboard.
+
+## 🔐 Security & Privacy
+
+JIVEXA is being developed with a focus on responsible healthcare data management.
+
+Security priorities include:
+
+- Secure authentication.
+- JWT-based session authorization.
+- Protected environment variables.
+- Controlled access to patient information.
+- Responsible handling of healthcare data.
+- Privacy-conscious data sharing.
+- Secure API configuration.
+
+Security and regulatory compliance are ongoing development responsibilities. This project does not claim ISO 27001 certification or regulatory approval.
+
+## 🩺 Important Medical Disclaimer
+
+JIVEXA's AI features are intended to provide informational assistance and help users understand health-related information.
+
+- AI-generated information is not a medical diagnosis.
+- AI-generated insights are not a substitute for professional medical advice.
+- Medical decisions should be made with qualified healthcare professionals.
+- In an emergency, contact local emergency medical services immediately.
+
+## 🛣️ Product Roadmap
+
+| Module | Development Stage |
+|---|---|
+| Patient Dashboard | Patient MVP |
+| JHID | Patient MVP |
+| AI Health Assistant | Patient MVP |
+| AI Report Analyzer | Patient MVP |
+| Digital Health Records | In Development |
+| Doctor Platform | Planned |
+| Pharmacy Integration | Planned |
+| Ambulance Integration | Planned |
+| Healthcare Administration | Planned |
+
+## 🎯 Our Vision
+
+Our vision is to build a connected healthcare operating system that brings patients, doctors, health records, AI assistance, pharmacies, and emergency healthcare services into a unified digital ecosystem.
+
+We believe technology can help make healthcare more accessible, understandable, and connected.
+
+## 👨‍💻 Founder
+
+**Mayank Gangwar**  
+Founder & CEO – JIVEXA Health
+
+Building AI-powered solutions for healthcare and education.
+
+## 📬 Connect With Us
+
+- Website: https://jivexa-mvp.vercel.app/
+- GitHub Organization: https://github.com/Jivexa-Health
+
+## 📄 License
+
+Copyright © 2026 JIVEXA Health.
+
+All rights reserved unless otherwise specified by an accompanying license.
 
 ---
 
-## 🔗 Links
-
-- **Live Production App:** [https://jivexa-main.vercel.app/](https://jivexa-main.vercel.app/)
-- **GitHub Code Repository:** [https://github.com/jivexa-ai/Jivexa-main](https://github.com/jivexa-ai/Jivexa-main)
-
----
-
-**Built for Jivexa Health OS.**
-#   J i v e x a - H e a l t h -  
- 
+<p align="center">
+  <strong>JIVEXA Health OS</strong><br/>
+  AI-Powered Health. Connected Care.
+  <br/><br/>
+  Building the Future of Healthcare.
+</p>
