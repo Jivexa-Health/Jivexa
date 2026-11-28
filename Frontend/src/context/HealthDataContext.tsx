@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
 import { createHealthIdApi, getMyHealthIdApi, searchHealthIdApi } from '../services/healthIdService';
+import { fetchApprovedDoctorsApi, VerifiedDoctor } from '../services/doctorService';
 import {
   createAppointmentApi,
   getAppointmentsApi,
@@ -11,7 +12,8 @@ import {
   updatePrescriptionApi,
   getMedicalReportsApi,
   saveMedicalReportApi,
-  deleteMedicalReportApi
+  deleteMedicalReportApi,
+  shareMedicalReportApi
 } from '../services/clinicalService';
 import {
   createPharmacyOrderApi,
@@ -23,23 +25,39 @@ import {
   getAmbulanceRequestsApi,
   updateAmbulanceRequestApi
 } from '../services/ambulanceService';
+import { MedicalReportRecord, SharedReportRecord } from '../types';
 
 // --- TYPES ---
 export interface Doctor {
   id: string;
+  roleId?: string;
   name: string;
   specialty: string;
+  specialization?: string;
   experience: number;
+  experienceYears?: number;
   location: string;
-  availability: string; // e.g. "Mon - Fri, 9:00 AM - 5:00 PM"
+  clinicAddress?: string;
+  city?: string;
+  availability: string;
+  availabilityText?: string;
   consultationType: 'Video' | 'In-Person' | 'Both';
-  rating: number;
+  consultationTypes?: ('In-Person' | 'Video')[];
+  availableDays?: string[];
+  availableSlots?: string[];
+  rating?: number;
   education: string;
+  qualifications?: string;
   about: string;
   fee: number;
+  consultationFee?: number;
   photoUrl?: string;
+  avatarUrl?: string;
   clinicName?: string;
   registrationNumber?: string;
+  isVerified?: boolean;
+  verificationStatus?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  languages?: string[];
   status?: 'pending' | 'approved' | 'rejected' | 'suspended';
 }
 
@@ -55,14 +73,25 @@ export interface Appointment {
   id: string;
   patientId: string;
   patientName: string;
+  patientPhone?: string;
   doctorId: string;
   doctorName: string;
   doctorSpecialty: string;
+  clinicName?: string;
+  clinicAddress?: string;
+  consultationFee?: number;
+  consultationType?: 'Video' | 'In-Person';
   date: string;
   time: string;
-  status: 'Upcoming' | 'Completed' | 'Cancelled' | 'Pending' | 'Confirmed' | 'In Consultation';
+  status: 'Pending' | 'Confirmed' | 'Rejected' | 'Cancelled' | 'Completed' | 'Upcoming' | 'In Consultation';
+  reason?: string;
   notes?: string;
   consultationSummary?: string;
+  rejectionReason?: string;
+  cancellationReason?: string;
+  cancelledBy?: string;
+  sharedReportIds?: string[];
+  createdAt?: string;
 }
 
 export interface HealthRecord {
@@ -73,7 +102,7 @@ export interface HealthRecord {
   date: string;
   fileName: string;
   fileSize: string;
-  fileUrl: string; // Fake local blob URL
+  fileUrl: string;
   uploadedBy: string;
 }
 
@@ -144,8 +173,6 @@ export interface HealthGoal {
   current: number;
   unit: string;
 }
-
-import { MedicalReportRecord, SharedReportRecord } from '../types';
 
 export interface AccessRequest {
   id: string;
@@ -223,6 +250,7 @@ export interface AmbulanceBooking {
 
 interface HealthDataContextType {
   doctors: Doctor[];
+  doctorsLoading: boolean;
   pharmacies: Pharmacy[];
   appointments: Appointment[];
   healthRecords: HealthRecord[];
@@ -238,19 +266,29 @@ interface HealthDataContextType {
   accessLogs: AccessLog[];
   ambulances: AmbulanceVehicle[];
   ambulanceBookings: AmbulanceBooking[];
-  
+
+  refreshDoctors: () => Promise<void>;
+  refreshAppointments: () => Promise<void>;
+
   // Patient operations
-  bookAppointment: (doctorId: string, date: string, time: string, notes: string) => Promise<{ success: boolean; appointment?: Appointment }>;
-  cancelAppointment: (id: string) => void;
-  rescheduleAppointment: (id: string, date: string, time: string) => void;
+  bookAppointment: (
+    doctorId: string,
+    date: string,
+    time: string,
+    notes: string,
+    consultationType?: 'Video' | 'In-Person',
+    sharedReportIds?: string[]
+  ) => Promise<{ success: boolean; appointment?: Appointment; error?: string }>;
+  cancelAppointment: (id: string) => Promise<{ success: boolean; error?: string }>;
+  rescheduleAppointment: (id: string, date: string, time: string) => Promise<{ success: boolean; error?: string }>;
   uploadHealthRecord: (name: string, type: HealthRecord['type'], fileName: string, fileSize: string) => Promise<{ success: boolean }>;
   deleteHealthRecord: (id: string) => void;
   placePharmacyOrder: (pharmacyId: string, items: OrderItem[], prescriptionId?: string, deliveryAddress?: string) => Promise<{ success: boolean; order?: Order }>;
   updatePatientProfile: (data: Partial<PatientProfile>) => void;
   saveAnalyzedReport: (report: MedicalReportRecord) => void;
   deleteMedicalReport: (reportId: string) => Promise<{ success: boolean; error?: string }>;
-  shareReportWithDoctor: (reportId: string, doctorId: string) => Promise<{ success: boolean }>;
-  
+  shareReportWithDoctor: (reportId: string, doctorId: string) => Promise<{ success: boolean; error?: string }>;
+
   // JHID & Consent Access Operations
   generateOrGetHealthId: (userId: string) => string;
   searchPatientByHealthId: (healthId: string) => Promise<{ success: boolean; patientInfo?: any; error?: string }>;
@@ -267,73 +305,59 @@ interface HealthDataContextType {
 
   // Doctor operations
   completeConsultation: (appointmentId: string, summary: string, meds?: Medication[], notes?: string, followUpDate?: string, status?: Prescription['status']) => void;
-  updateAppointmentStatus: (id: string, status: Appointment['status']) => Promise<void>;
-  
+  updateAppointmentStatus: (id: string, status: Appointment['status'], extra?: { rejectionReason?: string; consultationSummary?: string }) => Promise<{ success: boolean; error?: string }>;
+
   // Pharmacy operations
   updateOrderStatus: (orderId: string, status: Order['status']) => void;
   updateInventoryStock: (itemId: string, stock: number) => void;
-  
+
   // General
   markNotificationAsRead: (id: string) => void;
   markAllNotificationsAsRead: () => void;
   addNotification: (userId: string, message: string, type: Notification['type']) => void;
 }
 
-// --- INITIAL DEMO DATA ---
-const INITIAL_DOCTORS: Doctor[] = [
-  {
-    id: '00000000-0000-0000-0000-000000000001',
-    name: 'Dr. Anand Sen',
-    specialty: 'Cardiologist',
-    experience: 15,
-    location: 'Indiranagar, Bengaluru',
-    availability: 'Mon, Wed, Fri (10:00 AM - 4:00 PM)',
-    consultationType: 'Both',
-    rating: 4.9,
-    education: 'MBBS, MD (Cardiology) - AIIMS Delhi',
-    about: 'Dr. Anand Sen is a senior cardiologist with over 15 years of experience treating coronary artery disease, arrhythmias, and hypertension. He is dedicated to preventive cardiac care.',
-    fee: 800,
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000002',
-    name: 'Dr. Priya Sharma',
-    specialty: 'Pediatrician',
-    experience: 12,
-    location: 'Koramangala, Bengaluru',
-    availability: 'Tue, Thu, Sat (9:00 AM - 1:00 PM)',
-    consultationType: 'Both',
-    rating: 4.8,
-    education: 'MBBS, DCH - Bangalore Medical College',
-    about: 'Dr. Priya Sharma is a passionate pediatrician specializing in childhood growth development, immunizations, and general pediatric illnesses.',
-    fee: 600,
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000003',
-    name: 'Dr. Rajesh Patel',
-    specialty: 'Dermatologist',
-    experience: 10,
-    location: 'Jayanagar, Bengaluru',
-    availability: 'Mon - Fri (5:00 PM - 8:00 PM)',
-    consultationType: 'Video',
-    rating: 4.7,
-    education: 'MBBS, MD (Dermatology) - KEM Hospital Mumbai',
-    about: 'Dr. Rajesh Patel focuses on skin cancer screening, acne management, eczema treatment, and clinical hair fall therapies.',
-    fee: 700,
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000004',
-    name: 'Dr. Meera Nair',
-    specialty: 'General Physician',
-    experience: 8,
-    location: 'Whitefield, Bengaluru',
-    availability: 'Mon - Sat (9:00 AM - 5:00 PM)',
-    consultationType: 'Both',
-    rating: 4.6,
-    education: 'MBBS - Madras Medical College',
-    about: 'Dr. Meera Nair handles primary healthcare concerns, metabolic management, infectious diseases, and routine health assessments.',
-    fee: 500,
-  }
-];
+const mapVerifiedDoctorToDoctor = (d: VerifiedDoctor): Doctor => {
+  const types: ('In-Person' | 'Video')[] =
+    Array.isArray(d.consultationTypes) && d.consultationTypes.length > 0
+      ? d.consultationTypes
+      : ['In-Person', 'Video'];
+  const cType: Doctor['consultationType'] = types.includes('In-Person') && types.includes('Video')
+    ? 'Both'
+    : (types.includes('Video') ? 'Video' : 'In-Person');
+  const locationParts = [d.clinicAddress, d.city].filter(Boolean);
+  return {
+    id: d.id,
+    roleId: d.roleId,
+    name: d.name,
+    specialty: d.specialization || 'General Physician',
+    specialization: d.specialization || 'General Physician',
+    experience: Number(d.experienceYears || 0),
+    experienceYears: Number(d.experienceYears || 0),
+    location: locationParts.join(', ') || 'Verified Clinic',
+    clinicAddress: d.clinicAddress || '',
+    city: d.city || '',
+    availability: d.availabilityText || `${(d.availableDays || []).join(', ')}`,
+    availabilityText: d.availabilityText || '',
+    consultationType: cType,
+    consultationTypes: types,
+    availableDays: d.availableDays || [],
+    availableSlots: d.availableSlots || [],
+    education: d.qualifications || 'MBBS',
+    qualifications: d.qualifications || 'MBBS',
+    about: d.about || '',
+    fee: Number(d.consultationFee ?? 500),
+    consultationFee: Number(d.consultationFee ?? 500),
+    photoUrl: d.avatarUrl || '',
+    avatarUrl: d.avatarUrl || '',
+    clinicName: d.clinicName || '',
+    registrationNumber: d.nmcRegistrationNumber || '',
+    isVerified: Boolean(d.isVerified),
+    verificationStatus: d.verificationStatus || 'APPROVED',
+    languages: d.languages || ['English'],
+    status: 'approved'
+  };
+};
 
 const INITIAL_PHARMACIES: Pharmacy[] = [
   { id: '00000000-0000-0000-0000-000000000011', name: 'Jivexa Pharmacy Hub', address: 'Indiranagar Main Rd, Bengaluru', rating: 4.8, phone: '+91 80 4123 4567' },
@@ -351,7 +375,6 @@ const INITIAL_INVENTORY = (pharmId: string): InventoryItem[] => [
 
 const HealthDataContext = createContext<HealthDataContextType | undefined>(undefined);
 
-// Helper to map backend MongoDB report documents into Frontend MedicalReportRecord
 const mapMongoReportToRecord = (doc: any): MedicalReportRecord => {
   return {
     id: String(doc._id || doc.id),
@@ -366,7 +389,7 @@ const mapMongoReportToRecord = (doc: any): MedicalReportRecord => {
       reportId: String(doc._id || doc.id),
       reportTitle: doc.reportTitle || doc.fileName || 'Clinical Lab Report',
       reportDate: doc.reportDate || '',
-            healthScore: doc.healthScore,
+      healthScore: doc.healthScore,
       scoreStatus: doc.scoreStatus || 'Analysis Complete',
       scoreFormula: doc.scoreFormula || '',
       scoreMethodology: doc.scoreMethodology || '',
@@ -401,9 +424,11 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const userId = user?.id || '';
   const userName = user?.name || '';
 
-  // State slices
-  const [doctors, setDoctors] = useState<Doctor[]>(INITIAL_DOCTORS);
-  const [pharmacies, setPharmacies] = useState<Pharmacy[]>(INITIAL_PHARMACIES);
+  // Real verified doctors fetched from backend (never hardcoded fake doctors)
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [doctorsLoading, setDoctorsLoading] = useState(false);
+
+  const [pharmacies] = useState<Pharmacy[]>(INITIAL_PHARMACIES);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [healthRecords, setHealthRecords] = useState<HealthRecord[]>([]);
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
@@ -438,6 +463,35 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const saved = localStorage.getItem('jivexa_db_shared_reports');
     return saved ? JSON.parse(saved) : [];
   });
+
+  const refreshDoctors = useCallback(async () => {
+    setDoctorsLoading(true);
+    try {
+      const res = await fetchApprovedDoctorsApi();
+      if (res.success) {
+        setDoctors(res.doctors.map(mapVerifiedDoctorToDoctor));
+      }
+    } catch (e) {
+      console.warn('[HealthDataContext] Failed to load verified doctors');
+    } finally {
+      setDoctorsLoading(false);
+    }
+  }, []);
+
+  const refreshAppointments = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const liveApptsRes = await getAppointmentsApi();
+      if (liveApptsRes.success && Array.isArray(liveApptsRes.appointments)) {
+        setAppointments(liveApptsRes.appointments);
+        localStorage.setItem(`jivexa_db_appointments_${userId}`, JSON.stringify(liveApptsRes.appointments));
+      }
+    } catch (e) {}
+  }, [userId]);
+
+  useEffect(() => {
+    refreshDoctors();
+  }, [refreshDoctors]);
 
   const saveAnalyzedReport = async (report: MedicalReportRecord) => {
     setMedicalReports((prev) => {
@@ -500,10 +554,15 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
-  const shareReportWithDoctor = async (reportId: string, doctorId: string): Promise<{ success: boolean }> => {
+  const shareReportWithDoctor = async (reportId: string, doctorId: string): Promise<{ success: boolean; error?: string }> => {
     const report = medicalReports.find((r) => r.id === reportId);
     const doc = doctors.find((d) => d.id === doctorId);
-    if (!report || !doc) return { success: false };
+    if (!report || !doc) return { success: false, error: 'Report or verified doctor not found' };
+
+    const apiRes = await shareMedicalReportApi(reportId, doctorId, doc.name);
+    if (!apiRes.success) {
+      return { success: false, error: apiRes.error || 'Failed to share report' };
+    }
 
     const sharedRecord: SharedReportRecord = {
       id: `shared_${Date.now()}`,
@@ -520,7 +579,7 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
 
     setSharedReports((prev) => {
-      const updated = [sharedRecord, ...prev];
+      const updated = [sharedRecord, ...prev.filter((s) => !(s.reportId === report.id && s.doctorId === doc.id))];
       localStorage.setItem('jivexa_db_shared_reports', JSON.stringify(updated));
       return updated;
     });
@@ -533,27 +592,37 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Sync utilities for per-user cached state
   const syncAppointments = (list: Appointment[]) => {
     setAppointments(list);
-    localStorage.setItem(`jivexa_db_appointments_${userId}`, JSON.stringify(list));
+    if (userId) {
+      localStorage.setItem(`jivexa_db_appointments_${userId}`, JSON.stringify(list));
+    }
   };
 
   const syncRecords = (list: HealthRecord[]) => {
     setHealthRecords(list);
-    localStorage.setItem(`jivexa_db_records_${userId}`, JSON.stringify(list));
+    if (userId) {
+      localStorage.setItem(`jivexa_db_records_${userId}`, JSON.stringify(list));
+    }
   };
 
   const syncPrescriptions = (list: Prescription[]) => {
     setPrescriptions(list);
-    localStorage.setItem(`jivexa_db_prescriptions_${userId}`, JSON.stringify(list));
+    if (userId) {
+      localStorage.setItem(`jivexa_db_prescriptions_${userId}`, JSON.stringify(list));
+    }
   };
 
   const syncOrders = (list: Order[]) => {
     setOrders(list);
-    localStorage.setItem(`jivexa_db_orders_${userId}`, JSON.stringify(list));
+    if (userId) {
+      localStorage.setItem(`jivexa_db_orders_${userId}`, JSON.stringify(list));
+    }
   };
 
   const syncAmbulanceBookings = (list: AmbulanceBooking[]) => {
     setAmbulanceBookings(list);
-    localStorage.setItem(`jivexa_db_ambulance_${userId}`, JSON.stringify(list));
+    if (userId) {
+      localStorage.setItem(`jivexa_db_ambulance_${userId}`, JSON.stringify(list));
+    }
   };
 
   const syncInventory = (list: InventoryItem[]) => {
@@ -563,7 +632,9 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const syncNotifications = (list: Notification[]) => {
     setNotifications(list);
-    localStorage.setItem(`jivexa_notifications_${userId}`, JSON.stringify(list));
+    if (userId) {
+      localStorage.setItem(`jivexa_notifications_${userId}`, JSON.stringify(list));
+    }
   };
 
   // Load health data and MongoDB-backed records on mount and whenever userId changes
@@ -624,7 +695,7 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 bloodGroup: res.patient?.bloodGroup || prev?.bloodGroup || 'O+ Positive',
                 allergies: (res.patient?.healthProfile && res.patient?.healthProfile.allergies) || prev?.allergies || 'No known allergies',
                 conditions: (res.patient?.healthProfile && res.patient?.healthProfile.conditions) || prev?.conditions || 'None logged',
-                emergencyContact: (res.patient?.phoneNumber || res.patient?.email) || prev?.emergencyContact || (rawEmail ? `${rawName} (${rawEmail})` : `${rawName} (+91 99887 76655)`),
+                emergencyContact: (res.patient?.phoneNumber || res.patient?.email) || prev?.emergencyContact || (rawEmail ? `${rawName} (${rawEmail})` : `${rawName}`),
                 configuredAt: prev?.configuredAt || initialTimestamp,
                 updatedAt: prev?.updatedAt || initialTimestamp
               };
@@ -742,13 +813,30 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
       } catch (e) {}
 
-      // 9. Fetch Live Persistent Medical Reports from MongoDB
+      // 8. Fetch Live Persistent Medical Reports from MongoDB
       try {
         const liveReportsRes = await getMedicalReportsApi();
         if (liveReportsRes.success && Array.isArray(liveReportsRes.reports)) {
-          const mapped = liveReportsRes.reports.map(mapMongoReportToRecord);
-          setMedicalReports(mapped);
-          localStorage.setItem(`jivexa_db_medical_reports_${userId}`, JSON.stringify(mapped));
+          if (user?.role === 'DOCTOR') {
+            const doctorShared: SharedReportRecord[] = liveReportsRes.reports.map((r: any) => ({
+              id: `shared_${r._id || r.id}`,
+              reportId: String(r._id || r.id),
+              patientId: String(r.patientId),
+              patientName: r.patientName || 'Patient',
+              doctorId: userId,
+              doctorName: userName,
+              sharedAt: r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '',
+              reviewStatus: 'Pending Review',
+              reportTitle: r.reportTitle || r.fileName,
+              analysisSummary: r.summary || 'Shared AI Medical Report',
+              healthScore: r.healthScore || 0
+            }));
+            setSharedReports(doctorShared);
+          } else {
+            const mapped = liveReportsRes.reports.map(mapMongoReportToRecord);
+            setMedicalReports(mapped);
+            localStorage.setItem(`jivexa_db_medical_reports_${userId}`, JSON.stringify(mapped));
+          }
         } else {
           const cached = localStorage.getItem(`jivexa_db_medical_reports_${userId}`);
           setMedicalReports(cached ? JSON.parse(cached) : []);
@@ -756,7 +844,8 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       } catch (e) {
         console.warn('[HealthDataContext] Could not fetch MongoDB medical reports:', e);
       }
-      // 8. Fetch Live Persistent Ambulance Requests from MongoDB
+
+      // 9. Fetch Live Persistent Ambulance Requests from MongoDB
       try {
         const liveAmbRes = await getAmbulanceRequestsApi();
         const bookingsList = liveAmbRes.bookings || liveAmbRes.requests;
@@ -768,84 +857,86 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
 
     initializeData();
-  }, [userId]);
+  }, [userId, user?.role]);
 
   // --- ACTIONS ---
 
-  const bookAppointment = async (doctorId: string, date: string, time: string, notes: string) => {
+  const bookAppointment = async (
+    doctorId: string,
+    date: string,
+    time: string,
+    notes: string,
+    consultationType: 'Video' | 'In-Person' = 'In-Person',
+    sharedReportIds: string[] = []
+  ): Promise<{ success: boolean; appointment?: Appointment; error?: string }> => {
     const doctor = doctors.find((d) => d.id === doctorId);
-    if (!doctor) return { success: false };
-
-    let persistedAppt: Appointment | null = null;
-    try {
-      const apiRes = await createAppointmentApi({
-        doctorId,
-        doctorName: doctor.name,
-        doctorSpecialty: doctor.specialty,
-        date,
-        time,
-        consultationType: doctor.consultationType || 'Video',
-        notes
-      });
-      if (apiRes.success && apiRes.appointment) {
-        persistedAppt = apiRes.appointment;
-      }
-    } catch (e) {}
-
-    const newAppt: Appointment = persistedAppt || {
-      id: `appt_${Date.now()}`,
-      patientId: userId,
-      patientName: userName,
+    const apiRes = await createAppointmentApi({
       doctorId,
-      doctorName: doctor.name,
-      doctorSpecialty: doctor.specialty,
+      doctorName: doctor?.name,
+      doctorSpecialty: doctor?.specialty,
       date,
       time,
-      status: 'Upcoming',
-      notes
-    };
-    const updated = [newAppt, ...appointments.filter(a => a.id !== newAppt.id)];
+      consultationType,
+      reason: notes,
+      notes,
+      sharedReportIds
+    });
+
+    if (!apiRes.success || !apiRes.appointment) {
+      return { success: false, error: apiRes.error || 'Failed to book appointment' };
+    }
+
+    const newAppt = apiRes.appointment;
+    const updated = [newAppt, ...appointments.filter((a) => a.id !== newAppt.id)];
     syncAppointments(updated);
 
-    addNotification(userId, `Appointment scheduled with ${doctor.name} on ${date} at ${time}.`, 'appointment');
+    addNotification(userId, `Appointment requested with ${newAppt.doctorName} on ${date} at ${time}.`, 'appointment');
     addNotification(doctorId, `New appointment request from ${userName} on ${date} at ${time}.`, 'appointment');
 
     return { success: true, appointment: newAppt };
   };
 
-  const cancelAppointment = async (id: string) => {
+  const cancelAppointment = async (id: string): Promise<{ success: boolean; error?: string }> => {
     const appt = appointments.find((a) => a.id === id);
-    if (!appt) return;
+    const apiRes = await cancelAppointmentApi(id);
+    if (!apiRes.success) {
+      return { success: false, error: apiRes.error || 'Failed to cancel appointment' };
+    }
 
-    try {
-      await cancelAppointmentApi(id);
-    } catch (e) {}
-
-    const updated = appointments.map((a) => a.id === id ? { ...a, status: 'Cancelled' as const } : a);
+    const updated = appointments.map((a) =>
+      a.id === id ? (apiRes.appointment || { ...a, status: 'Cancelled' as const }) : a
+    );
     syncAppointments(updated);
 
-    addNotification(userId, `Appointment with ${appt.doctorName} has been cancelled.`, 'appointment');
-    addNotification(appt.doctorId, `Appointment with ${userName} has been cancelled.`, 'appointment');
+    if (appt) {
+      addNotification(userId, `Appointment with ${appt.doctorName} has been cancelled.`, 'appointment');
+      addNotification(appt.doctorId, `Appointment with ${userName} has been cancelled.`, 'appointment');
+    }
+    return { success: true };
   };
 
-  const rescheduleAppointment = async (id: string, date: string, time: string) => {
+  const rescheduleAppointment = async (id: string, date: string, time: string): Promise<{ success: boolean; error?: string }> => {
     const appt = appointments.find((a) => a.id === id);
-    if (!appt) return;
+    const apiRes = await updateAppointmentApi(id, { date, time });
+    if (!apiRes.success) {
+      return { success: false, error: apiRes.error || 'Failed to reschedule appointment' };
+    }
 
-    try {
-      await updateAppointmentApi(id, { date, time, status: 'Upcoming' });
-    } catch (e) {}
-
-    const updated = appointments.map((a) => a.id === id ? { ...a, date, time, status: 'Upcoming' as const } : a);
+    const updated = appointments.map((a) =>
+      a.id === id ? (apiRes.appointment || { ...a, date, time, status: 'Pending' as const }) : a
+    );
     syncAppointments(updated);
 
-    addNotification(userId, `Appointment with ${appt.doctorName} rescheduled to ${date} at ${time}.`, 'appointment');
-    addNotification(appt.doctorId, `Appointment with ${userName} rescheduled to ${date} at ${time}.`, 'appointment');
+    if (appt) {
+      addNotification(userId, `Appointment with ${appt.doctorName} rescheduled to ${date} at ${time}.`, 'appointment');
+      addNotification(appt.doctorId, `Appointment with ${userName} rescheduled to ${date} at ${time}.`, 'appointment');
+    }
+    return { success: true };
   };
 
   const uploadHealthRecord = async (name: string, type: HealthRecord['type'], fileName: string, fileSize: string) => {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
     const newRecord: HealthRecord = {
       id: `rec_${Date.now()}`,
       patientId: userId,
@@ -867,7 +958,7 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const deleteHealthRecord = async (id: string) => {
     const rec = healthRecords.find((r) => r.id === id);
     const name = rec ? rec.name : 'Record';
-    
+
     const updated = healthRecords.filter((r) => r.id !== id);
     syncRecords(updated);
 
@@ -877,7 +968,7 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const placePharmacyOrder = async (pharmacyId: string, items: OrderItem[], prescriptionId?: string, deliveryAddress?: string) => {
     const pharmacy = pharmacies.find((p) => p.id === pharmacyId);
     const pharmacyName = pharmacy?.name || 'Jivexa Partner Pharmacy';
-    const totalPrice = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
     let persistedOrder: Order | null = null;
     try {
@@ -932,10 +1023,10 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const completeConsultation = async (
-    appointmentId: string, 
-    summary: string, 
-    meds: Medication[] = [], 
-    notes = '', 
+    appointmentId: string,
+    summary: string,
+    meds: Medication[] = [],
+    notes = '',
     followUpDate?: string,
     status?: Prescription['status']
   ) => {
@@ -949,10 +1040,8 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
     } catch (e) {}
 
-    const updatedAppts = appointments.map((a) => 
-      a.id === appointmentId 
-        ? { ...a, status: 'Completed' as const, consultationSummary: summary } 
-        : a
+    const updatedAppts = appointments.map((a) =>
+      a.id === appointmentId ? { ...a, status: 'Completed' as const, consultationSummary: summary } : a
     );
     syncAppointments(updatedAppts);
 
@@ -986,7 +1075,7 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         status: status || 'Issued',
         followUpDate
       };
-      const updatedPres = [newPrescription, ...prescriptions.filter(p => p.id !== newPrescription.id)];
+      const updatedPres = [newPrescription, ...prescriptions.filter((p) => p.id !== newPrescription.id)];
       syncPrescriptions(updatedPres);
 
       if (status === 'Issued' || status === 'Active' || !status) {
@@ -1010,18 +1099,26 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     addNotification(appt.doctorId, `Consultation with ${appt.patientName} marked completed.`, 'appointment');
   };
 
-  const updateAppointmentStatus = async (id: string, status: Appointment['status']) => {
+  const updateAppointmentStatus = async (
+    id: string,
+    status: Appointment['status'],
+    extra?: { rejectionReason?: string; consultationSummary?: string }
+  ): Promise<{ success: boolean; error?: string }> => {
     const appt = appointments.find((a) => a.id === id);
-    if (!appt) return;
+    const apiRes = await updateAppointmentApi(id, { status, ...(extra || {}) });
+    if (!apiRes.success) {
+      return { success: false, error: apiRes.error || 'Failed to update appointment status' };
+    }
 
-    try {
-      await updateAppointmentApi(id, { status });
-    } catch (e) {}
-
-    const updated = appointments.map((a) => a.id === id ? { ...a, status } : a);
+    const updated = appointments.map((a) =>
+      a.id === id ? (apiRes.appointment || { ...a, status, ...(extra || {}) }) : a
+    );
     syncAppointments(updated);
-    addNotification(appt.patientId, `Appointment status updated to ${status}.`, 'appointment');
-    addNotification(appt.doctorId, `Appointment status updated to ${status}.`, 'appointment');
+    if (appt) {
+      addNotification(appt.patientId, `Appointment status updated to ${status}.`, 'appointment');
+      addNotification(appt.doctorId, `Appointment status updated to ${status}.`, 'appointment');
+    }
+    return { success: true };
   };
 
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
@@ -1032,7 +1129,7 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       await updatePharmacyOrderApi(orderId, { status });
     } catch (e) {}
 
-    const updated = orders.map((o) => o.id === orderId ? { ...o, status } : o);
+    const updated = orders.map((o) => (o.id === orderId ? { ...o, status } : o));
     syncOrders(updated);
 
     addNotification(order.patientId, `Your order status at ${order.pharmacyName} is now: ${status}.`, 'order');
@@ -1040,12 +1137,12 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updateInventoryStock = async (itemId: string, stock: number) => {
-    const updated = inventory.map((i) => i.id === itemId ? { ...i, stock } : i);
+    const updated = inventory.map((i) => (i.id === itemId ? { ...i, stock } : i));
     syncInventory(updated);
   };
 
   const markNotificationAsRead = async (id: string) => {
-    const updated = notifications.map((n) => n.id === id ? { ...n, isRead: true } : n);
+    const updated = notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n));
     syncNotifications(updated);
   };
 
@@ -1097,48 +1194,13 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       hash |= 0;
     }
     const positiveHash = Math.abs(hash);
-    const numPart = String((positiveHash * 997 + 100000) % 900000 + 100000);
+    const numPart = String(((positiveHash * 997 + 100000) % 900000) + 100000);
     return `JIV-2026-${numPart}`;
   };
 
   const searchPatientByHealthId = async (healthId: string) => {
     const cleanId = healthId.trim().toUpperCase();
-    
-    // Sample patient diagnostic reports associated with Health ID
-    const sampleReports = [
-      {
-        id: 'rep_cbc_01',
-        name: 'Complete Blood Count (CBC) Panel & Hematology Analysis',
-        type: 'Lab Report',
-        date: '2026-08-10',
-        fileSize: '2.4 MB',
-        summary: 'Hemoglobin: 14.2 g/dL (Normal: 13.5-17.5). WBC: 7,200/mcL (Normal). Platelet Count: 250,000/mcL. Overall hematology profile is optimal.',
-        score: 92,
-        status: 'Verified Optimal'
-      },
-      {
-        id: 'rep_xray_02',
-        name: 'Digital Chest X-Ray (PA View) & AI Diagnostic Imaging Summary',
-        type: 'Imaging / Radiology',
-        date: '2026-07-28',
-        fileSize: '5.8 MB',
-        summary: 'Lungs clear bilaterally. No focal parenchymal consolidation, pleural effusion, or pneumothorax observed. Cardiac size within normal limits.',
-        score: 96,
-        status: 'Normal Diagnostic'
-      },
-      {
-        id: 'rep_lipid_03',
-        name: 'Comprehensive Lipid & Metabolic Function Profile',
-        type: 'Lab Report',
-        date: '2026-06-15',
-        fileSize: '1.8 MB',
-        summary: 'Total Cholesterol: 175 mg/dL (Desirable < 200). HDL: 52 mg/dL. LDL: 98 mg/dL. Triglycerides: 120 mg/dL. Fasting Glucose: 92 mg/dL.',
-        score: 90,
-        status: 'Normal'
-      }
-    ];
 
-    // 1. Local fallback check
     if (patientProfile && (patientProfile.jivexaHealthId === cleanId || generateOrGetHealthId(patientProfile.userId) === cleanId)) {
       return {
         success: true,
@@ -1147,15 +1209,14 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           name: user?.name || 'Patient User',
           healthId: cleanId,
           bloodGroup: patientProfile.bloodGroup || 'O+ Positive',
-          allergies: patientProfile.allergies || 'Penicillin (mild)',
+          allergies: patientProfile.allergies || 'None logged',
           conditions: patientProfile.conditions || 'None logged',
           consentStatus: 'approved',
-          reports: sampleReports
+          reports: []
         }
       };
     }
 
-    // 2. MongoDB Backend Search
     try {
       const apiRes = await searchHealthIdApi(cleanId);
       if (apiRes.success && apiRes.patient) {
@@ -1176,8 +1237,8 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             bloodGroup: p.bloodGroup || 'O+',
             allergies: allergiesStr,
             conditions: chronicStr,
-            consentStatus: 'approved',
-            reports: sampleReports
+            consentStatus: 'pending',
+            reports: []
           }
         };
       }
@@ -1207,7 +1268,7 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       patientName: searchRes.patientInfo.name,
       doctorId: userId,
       doctorName: docName,
-      doctorSpecialty: 'Specialist Physician',
+      doctorSpecialty: user?.professionalDetails?.specialization || 'Specialist Physician',
       status: 'pending',
       createdAt: new Date().toISOString(),
       healthId: cleanId
@@ -1220,7 +1281,7 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const respondAccessRequest = async (requestId: string, newStatus: 'approved' | 'rejected') => {
     const targetReq = accessRequests.find((r) => r.id === requestId);
-    setAccessRequests((prev) => prev.map((r) => r.id === requestId ? { ...r, status: newStatus } : r));
+    setAccessRequests((prev) => prev.map((r) => (r.id === requestId ? { ...r, status: newStatus } : r)));
 
     if (targetReq) {
       addNotification(targetReq.doctorId, `Patient ${targetReq.patientName} ${newStatus} your health record access request.`, 'security');
@@ -1230,7 +1291,7 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const revokeDoctorAccess = async (doctorId: string) => {
-    setAccessRequests((prev) => prev.map((r) => r.patientId === userId && r.doctorId === doctorId ? { ...r, status: 'rejected' } : r));
+    setAccessRequests((prev) => prev.map((r) => (r.patientId === userId && r.doctorId === doctorId ? { ...r, status: 'rejected' } : r)));
     addNotification(doctorId, `Patient ${userName} revoked your access to their JIVEXA Health ID summary.`, 'security');
     return { success: true };
   };
@@ -1255,10 +1316,10 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     logAccess(cleanId, user ? (user.role as any) : 'PUBLIC', 'PUBLIC_EMERGENCY_LOOKUP');
 
     if (patientProfile && (patientProfile.jivexaHealthId === cleanId || generateOrGetHealthId(patientProfile.userId) === cleanId)) {
-      const rawName = user?.name || 'Mayank Gangwar';
+      const rawName = user?.name || 'Patient';
       const nameParts = rawName.split(' ');
-      const maskedName = nameParts.map(p => p.charAt(0) + '*'.repeat(Math.max(1, p.length - 1))).join(' ');
-      const rawPhone = user?.phone || '+91 99887 76655';
+      const maskedName = nameParts.map((p) => p.charAt(0) + '*'.repeat(Math.max(1, p.length - 1))).join(' ');
+      const rawPhone = user?.phone || '';
       const maskedPhone = rawPhone.length > 6 ? rawPhone.substring(0, 6) + '*****' + rawPhone.slice(-2) : rawPhone;
 
       return {
@@ -1266,31 +1327,13 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         publicProfile: {
           healthId: cleanId,
           maskedName,
-          age: 29,
-          gender: 'Male',
+          age: user?.age || null,
+          gender: user?.gender || 'Unspecified',
           bloodGroup: patientProfile.bloodGroup || 'O+ Positive',
-          allergies: patientProfile.allergies || 'Penicillin (mild)',
+          allergies: patientProfile.allergies || 'None logged',
           maskedEmergencyContact: maskedPhone,
           emergencySharingEnabled: patientProfile.emergencySharingEnabled || false,
           emergencyAccessExpiry: patientProfile.emergencyAccessExpiry || null,
-          lastUpdated: new Date().toISOString().split('T')[0]
-        }
-      };
-    }
-
-    if (cleanId.startsWith('JIV-2026-')) {
-      return {
-        success: true,
-        publicProfile: {
-          healthId: cleanId,
-          maskedName: 'A***** S*****',
-          age: 32,
-          gender: 'Female',
-          bloodGroup: 'B+ Positive',
-          allergies: 'Penicillin (mild)',
-          maskedEmergencyContact: '+91 98*****10',
-          emergencySharingEnabled: true,
-          emergencyAccessExpiry: new Date(Date.now() + 86400000 * 2).toISOString(),
           lastUpdated: new Date().toISOString().split('T')[0]
         }
       };
@@ -1301,218 +1344,112 @@ export const HealthDataProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const toggleEmergencyAccessMode = async (enabled: boolean, durationHours: number = 24) => {
     const expiry = enabled ? new Date(Date.now() + durationHours * 3600000).toISOString() : undefined;
-    
-    setPatientProfile((prev) => prev ? {
-      ...prev,
-      emergencySharingEnabled: enabled,
-      emergencyAccessExpiry: expiry
-    } : null);
+
+    setPatientProfile((prev) =>
+      prev
+        ? {
+            ...prev,
+            emergencySharingEnabled: enabled,
+            emergencyAccessExpiry: expiry
+          }
+        : null
+    );
 
     addNotification(userId, `Instant Emergency Access Mode was ${enabled ? 'ENABLED' : 'DISABLED'}.`, 'security');
     return { success: true };
   };
 
-  // --- AMBULANCE NETWORK STATE & OPERATIONS ---
-  const INITIAL_AMBULANCES_DATA: AmbulanceVehicle[] = [
-    {
-      id: 'amb_1',
-      partnerId: 'part_1',
-      partnerName: 'Ramesh Singh (Apollo Partner)',
-      partnerPhone: '+91 98765 43210',
-      vehicleNumber: 'KA-01-EQ-9112',
-      type: 'ICU',
-      availability: 'Available',
-      latitude: 12.9716,
-      longitude: 77.5946,
-      hospitalPartner: 'Apollo Hospital Indiranagar',
-      rating: 4.9,
-      baseFare: 1200
-    },
-    {
-      id: 'amb_2',
-      partnerId: 'part_2',
-      partnerName: 'Vikram Patel (Manipal Express)',
-      partnerPhone: '+91 98112 33445',
-      vehicleNumber: 'KA-05-EM-4080',
-      type: 'Oxygen',
-      availability: 'Available',
-      latitude: 12.9780,
-      longitude: 77.6010,
-      hospitalPartner: 'Manipal Hospital',
-      rating: 4.8,
-      baseFare: 800
-    },
-    {
-      id: 'amb_3',
-      partnerId: 'part_3',
-      partnerName: 'Sunil Kumar (LifeLine Response)',
-      partnerPhone: '+91 99001 22334',
-      vehicleNumber: 'KA-03-ALS-1008',
-      type: 'ALS',
-      availability: 'Available',
-      latitude: 12.9650,
-      longitude: 77.5890,
-      hospitalPartner: 'Fortis Healthcare Network',
-      rating: 5.0,
-      baseFare: 1800
-    },
-    {
-      id: 'amb_4',
-      partnerId: 'part_4',
-      partnerName: 'Suresh Gowda (City Care)',
-      partnerPhone: '+91 97400 55667',
-      vehicleNumber: 'KA-02-AMB-5001',
-      type: 'Basic',
-      availability: 'Available',
-      latitude: 12.9800,
-      longitude: 77.6100,
-      hospitalPartner: 'General Care Network',
-      rating: 4.7,
-      baseFare: 500
-    }
-  ];
-
-  const [ambulances, setAmbulances] = useState<AmbulanceVehicle[]>(INITIAL_AMBULANCES_DATA);
+  // --- AMBULANCE NETWORK STATE & OPERATIONS (Preserved for compatibility) ---
+  const [ambulances, setAmbulances] = useState<AmbulanceVehicle[]>([]);
   const [ambulanceBookings, setAmbulanceBookings] = useState<AmbulanceBooking[]>([]);
 
   const bookAmbulance = async (details: { ambulanceType: 'Basic' | 'Oxygen' | 'ICU' | 'ALS'; pickupAddress: string; destinationAddress: string; pickupLat: number; pickupLng: number; destLat: number; destLng: number; fare: number }) => {
-    // Smart matching algorithm: find nearest available ambulance of requested type
-    let matchedVeh = ambulances.find((a) => a.type === details.ambulanceType && a.availability === 'Available');
-    if (!matchedVeh) {
-      matchedVeh = ambulances.find((a) => a.availability === 'Available') || ambulances[0];
-    }
-
-    let persistedBooking: AmbulanceBooking | null = null;
-    try {
-      const apiRes = await createAmbulanceRequestApi({
-        ambulanceType: details.ambulanceType,
-        pickupAddress: details.pickupAddress,
-        destinationAddress: details.destinationAddress,
-        pickupLat: details.pickupLat,
-        pickupLng: details.pickupLng,
-        destLat: details.destLat,
-        destLng: details.destLng,
-        fare: details.fare,
-        ambulanceId: matchedVeh.id,
-        vehicleNumber: matchedVeh.vehicleNumber,
-        driverName: matchedVeh.partnerName,
-        driverPhone: matchedVeh.partnerPhone,
-        jivexaHealthId: patientProfile?.jivexaHealthId || generateOrGetHealthId(userId)
-      });
-      if (apiRes.success && apiRes.booking) {
-        persistedBooking = apiRes.booking;
-      }
-    } catch (e) {}
-
-    const bookingId = `amb_book_${Date.now()}`;
-    const newBooking: AmbulanceBooking = persistedBooking || {
-      id: bookingId,
-      patientId: userId,
-      patientName: userName,
-      patientPhone: user?.phone || '+91 99887 76655',
-      jivexaHealthId: patientProfile?.jivexaHealthId || generateOrGetHealthId(userId),
-      ambulanceId: matchedVeh.id,
+    const apiRes = await createAmbulanceRequestApi({
       ambulanceType: details.ambulanceType,
-      vehicleNumber: matchedVeh.vehicleNumber,
-      driverName: matchedVeh.partnerName,
-      driverPhone: matchedVeh.partnerPhone,
       pickupAddress: details.pickupAddress,
       destinationAddress: details.destinationAddress,
       pickupLat: details.pickupLat,
       pickupLng: details.pickupLng,
       destLat: details.destLat,
       destLng: details.destLng,
-      status: 'Accepted',
       fare: details.fare,
-      createdAt: new Date().toISOString(),
-      acceptedAt: new Date().toISOString()
-    };
-
-    // Mark assigned vehicle busy
-    setAmbulances((prev) => prev.map((a) => a.id === matchedVeh!.id ? { ...a, availability: 'Busy' } : a));
-    const updated = [newBooking, ...ambulanceBookings.filter((b) => b.id !== newBooking.id)];
+      jivexaHealthId: patientProfile?.jivexaHealthId || generateOrGetHealthId(userId)
+    });
+    if (!apiRes.success || !apiRes.booking) {
+      return { success: false };
+    }
+    const updated = [apiRes.booking, ...ambulanceBookings];
     syncAmbulanceBookings(updated);
-
-    addNotification(userId, `Emergency Ambulance (${matchedVeh.vehicleNumber}) dispatched to ${details.pickupAddress}.`, 'emergency');
-    return { success: true, booking: newBooking };
+    return { success: true, booking: apiRes.booking };
   };
 
   const updateAmbulanceBookingStatus = async (bookingId: string, newStatus: AmbulanceBooking['status']) => {
-    const targetBk = ambulanceBookings.find((b) => b.id === bookingId);
-    
-    try {
-      await updateAmbulanceRequestApi(bookingId, { status: newStatus });
-    } catch (e) {}
-
-    const updated = ambulanceBookings.map((b) => b.id === bookingId ? {
-      ...b,
-      status: newStatus,
-      completedAt: newStatus === 'Completed' ? new Date().toISOString() : b.completedAt
-    } : b);
+    await updateAmbulanceRequestApi(bookingId, { status: newStatus }).catch(() => {});
+    const updated = ambulanceBookings.map((b) =>
+      b.id === bookingId
+        ? { ...b, status: newStatus, completedAt: newStatus === 'Completed' ? new Date().toISOString() : b.completedAt }
+        : b
+    );
     syncAmbulanceBookings(updated);
-
-    if (targetBk && targetBk.ambulanceId && ['Completed', 'Cancelled'].includes(newStatus)) {
-      setAmbulances((prev) => prev.map((a) => a.id === targetBk.ambulanceId ? { ...a, availability: 'Available' } : a));
-    }
-
-    if (targetBk) {
-      addNotification(targetBk.patientId, `Ambulance booking status updated to ${newStatus}.`, 'emergency');
-    }
-
     return { success: true };
   };
 
   const toggleAmbulanceAvailability = async (ambulanceId: string, availability: AmbulanceVehicle['availability']) => {
-    setAmbulances((prev) => prev.map((a) => a.id === ambulanceId || a.partnerId === userId ? { ...a, availability } : a));
+    setAmbulances((prev) => prev.map((a) => (a.id === ambulanceId || a.partnerId === userId ? { ...a, availability } : a)));
     return { success: true };
   };
 
   return (
-    <HealthDataContext.Provider value={{
-      doctors,
-      pharmacies,
-      appointments,
-      healthRecords,
-      prescriptions,
-      orders,
-      inventory,
-      notifications,
-      healthGoals,
-      patientProfile: patientProfile ? { ...patientProfile, jivexaHealthId: patientProfile.jivexaHealthId || generateOrGetHealthId(userId) } : null,
-      medicalReports,
-      sharedReports,
-      accessRequests,
-      accessLogs,
-      ambulances,
-      ambulanceBookings,
-      bookAppointment,
-      cancelAppointment,
-      rescheduleAppointment,
-      uploadHealthRecord,
-      deleteHealthRecord,
-      placePharmacyOrder,
-      updatePatientProfile,
-      saveAnalyzedReport,
-      deleteMedicalReport,
-      shareReportWithDoctor,
-      generateOrGetHealthId,
-      searchPatientByHealthId,
-      getPublicHealthIdProfile,
-      toggleEmergencyAccessMode,
-      requestPatientAccess,
-      respondAccessRequest,
-      revokeDoctorAccess,
-      bookAmbulance,
-      updateAmbulanceBookingStatus,
-      toggleAmbulanceAvailability,
-      completeConsultation,
-      updateAppointmentStatus,
-      updateOrderStatus,
-      updateInventoryStock,
-      markNotificationAsRead,
-      markAllNotificationsAsRead,
-      addNotification
-    }}>
+    <HealthDataContext.Provider
+      value={{
+        doctors,
+        doctorsLoading,
+        pharmacies,
+        appointments,
+        healthRecords,
+        prescriptions,
+        orders,
+        inventory,
+        notifications,
+        healthGoals,
+        patientProfile: patientProfile ? { ...patientProfile, jivexaHealthId: patientProfile.jivexaHealthId || generateOrGetHealthId(userId) } : null,
+        medicalReports,
+        sharedReports,
+        accessRequests,
+        accessLogs,
+        ambulances,
+        ambulanceBookings,
+        refreshDoctors,
+        refreshAppointments,
+        bookAppointment,
+        cancelAppointment,
+        rescheduleAppointment,
+        uploadHealthRecord,
+        deleteHealthRecord,
+        placePharmacyOrder,
+        updatePatientProfile,
+        saveAnalyzedReport,
+        deleteMedicalReport,
+        shareReportWithDoctor,
+        generateOrGetHealthId,
+        searchPatientByHealthId,
+        getPublicHealthIdProfile,
+        toggleEmergencyAccessMode,
+        requestPatientAccess,
+        respondAccessRequest,
+        revokeDoctorAccess,
+        bookAmbulance,
+        updateAmbulanceBookingStatus,
+        toggleAmbulanceAvailability,
+        completeConsultation,
+        updateAppointmentStatus,
+        updateOrderStatus,
+        updateInventoryStock,
+        markNotificationAsRead,
+        markAllNotificationsAsRead,
+        addNotification
+      }}
+    >
       {children}
     </HealthDataContext.Provider>
   );

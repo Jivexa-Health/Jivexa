@@ -114,7 +114,7 @@ const safeFetchJson = async (url: string, options: RequestInit): Promise<{ ok: b
  * Resilient multi-endpoint fetch that falls back to alternate candidate URLs
  * if a network failure (status 0 / Failed to fetch) occurs.
  */
-const safeFetchWithFallback = async (
+export const safeFetchWithFallback = async (
   path: string,
   options: RequestInit
 ): Promise<{ ok: boolean; status: number; data: any; usedUrl: string }> => {
@@ -134,16 +134,12 @@ const safeFetchWithFallback = async (
     const res = await safeFetchJson(fullUrl, options);
     lastResult = { ...res, usedUrl: baseUrl };
 
-    // If server responded with an application HTTP status code, network connection was established.
-    // 502 Bad Gateway and 504 Gateway Timeout indicate a proxy/gateway (e.g. Vite proxy, CDN)
-    // failed to reach the upstream backend, so fallback should continue to alternate endpoints.
     const isProxyGatewayError = res.status === 502 || res.status === 504;
     if (res.status > 0 && !isProxyGatewayError) {
       return lastResult;
     }
   }
 
-  // If all candidate endpoints failed or returned proxy gateway errors, normalize to connection error
   if (lastResult.status === 0 || lastResult.status === 502 || lastResult.status === 504) {
     lastResult = {
       ok: false,
@@ -175,6 +171,15 @@ export interface NodeAuthResponse {
   unauthenticated?: boolean;
 }
 
+export const getStoredAuthHeaders = (): Record<string, string> => {
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+};
+
 export const nodeAuthResendVerification = async (email: string): Promise<NodeAuthResponse> => {
   try {
     const res = await safeFetchWithFallback('/api/auth/resend-verification', {
@@ -183,9 +188,9 @@ export const nodeAuthResendVerification = async (email: string): Promise<NodeAut
       body: JSON.stringify({ email })
     });
     if (!res.ok) {
-      return { 
-        success: false, 
-        error: res.data?.message || res.data?.error || 'Failed to resend verification email' 
+      return {
+        success: false,
+        error: res.data?.message || res.data?.error || 'Failed to resend verification email'
       };
     }
     return {
@@ -206,6 +211,7 @@ export const nodeAuthSignup = async (
   extraFields?: Record<string, any>
 ): Promise<NodeAuthResponse> => {
   try {
+    const endpoint = '/api/auth/signup';
     const bodyObj = { name, email, password, role, ...extraFields };
     const options: RequestInit = {
       method: 'POST',
@@ -214,8 +220,7 @@ export const nodeAuthSignup = async (
       body: JSON.stringify(bodyObj)
     };
 
-    // Canonical endpoint: POST /api/auth/signup with multi-endpoint fallback
-    const res = await safeFetchWithFallback('/api/auth/signup', options);
+    const res = await safeFetchWithFallback(endpoint, options);
 
     if (!res.ok) {
       const errMsg = res.data?.message || res.data?.error || 'Registration failed on server.';
@@ -266,15 +271,15 @@ export const nodeAuthLogin = async (
   role?: UserRole
 ): Promise<NodeAuthResponse> => {
   try {
+    const endpoint = '/api/auth/login';
     const options: RequestInit = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ email, password, role })
+      body: JSON.stringify({ email, password, ...(role ? { role } : {}) })
     };
 
-    // Canonical endpoint: POST /api/auth/login with multi-endpoint fallback
-    const res = await safeFetchWithFallback('/api/auth/login', options);
+    const res = await safeFetchWithFallback(endpoint, options);
 
     if (!res.ok) {
       const errMsg = res.data?.message || res.data?.error || 'Invalid credentials.';
@@ -316,16 +321,9 @@ export const nodeAuthLogin = async (
 
 export const nodeAuthLogout = async (): Promise<NodeAuthResponse> => {
   try {
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    // Canonical endpoint: POST /api/auth/logout with fallback
     await safeFetchWithFallback('/api/auth/logout', {
       method: 'POST',
-      headers,
+      headers: getStoredAuthHeaders(),
       credentials: 'include'
     }).catch(() => {});
 
@@ -344,15 +342,9 @@ export const nodeAuthGetMe = async (): Promise<NodeAuthResponse> => {
       return { success: false, unauthenticated: true };
     }
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    };
-
-    // Canonical endpoint: GET /api/auth/me with fallback
     const res = await safeFetchWithFallback('/api/auth/me', {
       method: 'GET',
-      headers,
+      headers: getStoredAuthHeaders(),
       credentials: 'include'
     });
 
@@ -369,6 +361,60 @@ export const nodeAuthGetMe = async (): Promise<NodeAuthResponse> => {
     };
   } catch (err: any) {
     return { success: false, error: 'Backend session lookup skipped' };
+  }
+};
+
+export const nodeAuthUpdateProfile = async (payload: Record<string, any>): Promise<NodeAuthResponse> => {
+  try {
+    const res = await safeFetchWithFallback('/api/auth/profile', {
+      method: 'PUT',
+      headers: getStoredAuthHeaders(),
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      return { success: false, error: res.data?.error || res.data?.message || 'Failed to update profile' };
+    }
+    return {
+      success: true,
+      message: res.data?.message || 'Profile updated',
+      user: res.data?.user
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error updating profile' };
+  }
+};
+
+export const nodeAuthChangePassword = async (currentPassword: string, newPassword: string): Promise<{ success: boolean; message?: string; error?: string }> => {
+  try {
+    const res = await safeFetchWithFallback('/api/auth/change-password', {
+      method: 'PUT',
+      headers: getStoredAuthHeaders(),
+      credentials: 'include',
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    if (!res.ok) {
+      return { success: false, error: res.data?.error || res.data?.message || 'Failed to change password' };
+    }
+    return { success: true, message: res.data?.message || 'Password updated successfully' };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error changing password' };
+  }
+};
+
+export const nodeAuthGetAuditLogs = async (): Promise<{ success: boolean; logs?: any[]; error?: string }> => {
+  try {
+    const res = await safeFetchWithFallback('/api/auth/audit-logs', {
+      method: 'GET',
+      headers: getStoredAuthHeaders(),
+      credentials: 'include'
+    });
+    if (!res.ok) {
+      return { success: false, error: res.data?.error || 'Failed to load audit logs' };
+    }
+    return { success: true, logs: res.data?.logs || [] };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error loading audit logs' };
   }
 };
 
@@ -434,15 +480,9 @@ export const nodeAuthVerifyOTP = async (email: string, code: string): Promise<No
 
 export const nodeAuthSubmitVerification = async (payload: Record<string, any>): Promise<NodeAuthResponse> => {
   try {
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
     const res = await safeFetchWithFallback('/api/auth/submit-verification', {
       method: 'POST',
-      headers,
+      headers: getStoredAuthHeaders(),
       credentials: 'include',
       body: JSON.stringify(payload)
     });
@@ -466,12 +506,6 @@ export const nodeAuthSubmitVerification = async (payload: Record<string, any>): 
 
 export const nodeAuthUploadProfilePhoto = async (file: File): Promise<{ success: boolean; avatarUrl?: string; error?: string }> => {
   try {
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
     const base64DataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
@@ -481,7 +515,7 @@ export const nodeAuthUploadProfilePhoto = async (file: File): Promise<{ success:
 
     const res = await safeFetchWithFallback('/api/auth/profile-photo', {
       method: 'POST',
-      headers,
+      headers: getStoredAuthHeaders(),
       credentials: 'include',
       body: JSON.stringify({
         image: base64DataUrl,
@@ -507,15 +541,9 @@ export const nodeAuthUploadProfilePhoto = async (file: File): Promise<{ success:
 
 export const nodeAuthRemoveProfilePhoto = async (): Promise<{ success: boolean; error?: string }> => {
   try {
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
     const res = await safeFetchWithFallback('/api/auth/profile-photo', {
       method: 'DELETE',
-      headers,
+      headers: getStoredAuthHeaders(),
       credentials: 'include'
     });
 

@@ -27,7 +27,7 @@ export const PatientProfileEdit: React.FC = () => {
     name: user?.name || '',
     phone: user?.phone || '',
     dob: user?.dob || '',
-    gender: 'Male',
+    gender: user?.gender || 'Male',
     height: '175',
     weight: '68',
     bloodGroup: patientProfile?.bloodGroup || 'O+ Positive',
@@ -128,8 +128,6 @@ export const PatientProfileEdit: React.FC = () => {
     setIsSaving(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-
       updatePatientProfile({
         bloodGroup: form.bloodGroup,
         allergies: form.allergies,
@@ -137,14 +135,28 @@ export const PatientProfileEdit: React.FC = () => {
         emergencyContact: `${form.emergencyName} (${form.emergencyRelation}): ${form.emergencyContact}`
       });
 
-      await updateOnboarding({
+      const res = await updateOnboarding({
         name: form.name,
         phone: form.phone,
-        dob: form.dob
+        dob: form.dob,
+        gender: form.gender,
+        bloodGroup: form.bloodGroup,
+        allergies: form.allergies,
+        conditions: form.conditions,
+        emergencyContact: {
+          name: form.emergencyName,
+          relationship: form.emergencyRelation,
+          phone: form.emergencyContact
+        }
       });
 
+      if (!res.success) {
+        setError(res.error || 'Failed to save profile settings.');
+        return;
+      }
+
       setLastSavedAt(new Date().toISOString());
-      setToastMessage('🎉 Profile updated successfully! All medical preferences saved.');
+      setToastMessage('Profile updated successfully! Personal and health details saved.');
     } catch (e) {
       setError('Failed to save profile settings.');
     } finally {

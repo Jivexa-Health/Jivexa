@@ -370,11 +370,11 @@ export const ForDoctors: React.FC = () => {
           Manage patient queues, view AI-summarized lab reports, issue digital prescriptions, and access ABHA longitudinal records in seconds.
         </p>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '16px' }}>
-          <Button size="lg" onClick={() => navigate('/signup')} style={{ height: '48px', padding: '0 28px', fontWeight: 700 }}>
+          <Button size="lg" onClick={() => navigate('/signup?role=DOCTOR')} style={{ height: '48px', padding: '0 28px', fontWeight: 700 }}>
             Register as Doctor
           </Button>
           <Button variant="outline" size="lg" onClick={() => navigate('/login')} style={{ height: '48px', padding: '0 28px', fontWeight: 700 }}>
-            Doctor Sign In
+            Sign In
           </Button>
         </div>
       </div>

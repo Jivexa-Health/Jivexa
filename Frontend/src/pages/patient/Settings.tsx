@@ -6,6 +6,7 @@ import {
   revokeAllOtherSessionsApi 
 } from '../../services/sessionService';
 import { useAuth } from '../../context/AuthContext';
+import { nodeAuthChangePassword, nodeAuthGetAuditLogs } from '../../services/nodeAuthService';
 import { useHealthData } from '../../context/HealthDataContext';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -21,12 +22,16 @@ import {
 
 
 export const PatientSettings: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateOnboarding } = useAuth();
   const { patientProfile, healthRecords, appointments } = useHealthData();
   
-  // Notification Preferences
-  const [allowNotifs, setAllowNotifs] = useState(true);
-  const [allowEmailNotifs, setAllowEmailNotifs] = useState(true);
+  // Notification & Privacy Preferences (synced with backend)
+  const [allowNotifs, setAllowNotifs] = useState(user?.notificationPreferences?.inApp ?? true);
+  const [allowEmailNotifs, setAllowEmailNotifs] = useState(user?.notificationPreferences?.email ?? true);
+  const [allowApptReminders, setAllowApptReminders] = useState(user?.notificationPreferences?.appointmentReminders ?? true);
+  const [allowEmergencyLookup, setAllowEmergencyLookup] = useState(user?.privacySettings?.allowEmergencyLookup ?? true);
+  const [consentLogsEnabled, setConsentLogsEnabled] = useState(user?.privacySettings?.consentLogsEnabled ?? true);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
   
   // Security & 2FA State
   const [enable2FA, setEnable2FA] = useState(true);
@@ -58,6 +63,7 @@ export const PatientSettings: React.FC = () => {
 
   useEffect(() => {
     loadSessions();
+    nodeAuthGetAuditLogs().then((res) => { if (res.success && res.logs) setAuditLogs(res.logs.slice(0, 8)); });
   }, []);
 
   // Password Form State
@@ -84,11 +90,31 @@ export const PatientSettings: React.FC = () => {
     setPassError('');
     setIsUpdatingPass(true);
 
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
+    const res = await nodeAuthChangePassword(passForm.current, passForm.new);
     setIsUpdatingPass(false);
-    setToastMsg('🔐 Password updated successfully.');
+
+    if (!res.success) {
+      setPassError(res.error || 'Failed to update password.');
+      return;
+    }
+
+    setToastMsg('Password updated successfully.');
     setPassForm({ current: '', new: '', confirm: '' });
+  };
+
+  const persistPreferences = async (nextNotifs: { inApp: boolean; email: boolean; appointmentReminders: boolean }, nextPrivacy: { allowEmergencyLookup: boolean; consentLogsEnabled: boolean }) => {
+    const res = await updateOnboarding({
+      notificationPreferences: nextNotifs,
+      privacySettings: {
+        shareHealthSummaryOnBooking: false,
+        ...nextPrivacy
+      }
+    });
+    if (res.success) {
+      setToastMsg('Preferences saved to your account.');
+    } else {
+      setToastMsg('Error: ' + (res.error || 'Could not save preferences'));
+    }
   };
 
   const handleRevokeSession = async (sessionId: string) => {
@@ -401,23 +427,50 @@ export const PatientSettings: React.FC = () => {
             <input 
               type="checkbox" 
               checked={allowNotifs} 
-              onChange={() => setAllowNotifs(!allowNotifs)}
-              style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+              onChange={() => {
+                const next = !allowNotifs;
+                setAllowNotifs(next);
+                persistPreferences({ inApp: next, email: allowEmailNotifs, appointmentReminders: allowApptReminders }, { allowEmergencyLookup, consentLogsEnabled });
+              }}
+              style={{ width: '20px', height: '20px', cursor: 'pointer', accentColor: 'var(--primary)' }}
             />
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '16px' }} className="flex-col-mobile gap-sm">
             <div>
-              <span style={{ display: 'block', fontSize: '0.9rem', fontWeight: 700 }}>Enable Email Alerts & Prescription Reminders</span>
+              <span style={{ display: 'block', fontSize: '0.9rem', fontWeight: 700 }}>Enable Email Alerts & Appointment Updates</span>
               <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                Send medication schedules and order updates to: <strong>{user?.email || 'patient@jivexa.in'}</strong>
+                Send appointment status and health notifications to: <strong>{user?.email || 'patient@jivexa.in'}</strong>
               </span>
             </div>
             <input 
               type="checkbox" 
               checked={allowEmailNotifs} 
-              onChange={() => setAllowEmailNotifs(!allowEmailNotifs)}
-              style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+              onChange={() => {
+                const next = !allowEmailNotifs;
+                setAllowEmailNotifs(next);
+                persistPreferences({ inApp: allowNotifs, email: next, appointmentReminders: allowApptReminders }, { allowEmergencyLookup, consentLogsEnabled });
+              }}
+              style={{ width: '20px', height: '20px', cursor: 'pointer', accentColor: 'var(--primary)' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '16px' }} className="flex-col-mobile gap-sm">
+            <div>
+              <span style={{ display: 'block', fontSize: '0.9rem', fontWeight: 700 }}>Appointment Reminder Alerts</span>
+              <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                Receive reminders when your doctor confirms or updates your booking.
+              </span>
+            </div>
+            <input 
+              type="checkbox" 
+              checked={allowApptReminders} 
+              onChange={() => {
+                const next = !allowApptReminders;
+                setAllowApptReminders(next);
+                persistPreferences({ inApp: allowNotifs, email: allowEmailNotifs, appointmentReminders: next }, { allowEmergencyLookup, consentLogsEnabled });
+              }}
+              style={{ width: '20px', height: '20px', cursor: 'pointer', accentColor: 'var(--primary)' }}
             />
           </div>
         </div>
@@ -472,6 +525,54 @@ export const PatientSettings: React.FC = () => {
       {/* 6. PRIVACY & DANGEROUS ACTIONS */}
       <Card title={<div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Shield size={18} /><span>Privacy & Data Management</span></div>}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} className="flex-col-mobile gap-sm">
+            <div>
+              <span style={{ display: 'block', fontSize: '0.9rem', fontWeight: 700 }}>Allow JHID Emergency Lookup</span>
+              <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>Allow emergency responders to look up your public JHID emergency summary (blood group, allergies, emergency contact).</span>
+            </div>
+            <input
+              type="checkbox"
+              checked={allowEmergencyLookup}
+              onChange={() => {
+                const next = !allowEmergencyLookup;
+                setAllowEmergencyLookup(next);
+                persistPreferences({ inApp: allowNotifs, email: allowEmailNotifs, appointmentReminders: allowApptReminders }, { allowEmergencyLookup: next, consentLogsEnabled });
+              }}
+              style={{ width: '20px', height: '20px', cursor: 'pointer', accentColor: 'var(--primary)' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '16px' }} className="flex-col-mobile gap-sm">
+            <div>
+              <span style={{ display: 'block', fontSize: '0.9rem', fontWeight: 700 }}>Strict Per-Report Sharing Consent</span>
+              <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>Doctors can only view lab reports you explicitly select and share during booking or from My Appointments.</span>
+            </div>
+            <input
+              type="checkbox"
+              checked={consentLogsEnabled}
+              onChange={() => {
+                const next = !consentLogsEnabled;
+                setConsentLogsEnabled(next);
+                persistPreferences({ inApp: allowNotifs, email: allowEmailNotifs, appointmentReminders: allowApptReminders }, { allowEmergencyLookup, consentLogsEnabled: next });
+              }}
+              style={{ width: '20px', height: '20px', cursor: 'pointer', accentColor: 'var(--primary)' }}
+            />
+          </div>
+
+          {auditLogs.length > 0 && (
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+              <span style={{ display: 'block', fontSize: '0.86rem', fontWeight: 800, marginBottom: '8px' }}>Recent Security & Consent Activity</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '150px', overflowY: 'auto' }}>
+                {auditLogs.map((log: any) => (
+                  <div key={log.id || log._id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-muted)', padding: '4px 0', borderBottom: '1px dotted var(--border)' }}>
+                    <strong style={{ color: 'var(--text-dark)' }}>{String(log.action).replace(/_/g, ' ')}</strong>
+                    <span>{log.createdAt ? new Date(log.createdAt).toLocaleString() : ''}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} className="flex-col-mobile gap-sm">
             <div>
               <span style={{ display: 'block', fontSize: '0.9rem', fontWeight: 700 }}>Download Personal Encrypted Data Backup</span>

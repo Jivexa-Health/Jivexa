@@ -37,8 +37,10 @@ export const createAppointmentApi = async (data: {
   doctorSpecialty?: string;
   date: string;
   time: string;
-  consultationType?: 'Video' | 'In-Person' | 'Both';
+  consultationType?: 'Video' | 'In-Person';
+  reason?: string;
   notes?: string;
+  sharedReportIds?: string[];
 }): Promise<{ success: boolean; appointment?: Appointment; error?: string }> => {
   try {
     const backendUrl = getBackendUrl();
@@ -78,13 +80,41 @@ export const getAppointmentsApi = async (): Promise<{ success: boolean; appointm
   }
 };
 
+export const getAppointmentByIdApi = async (id: string): Promise<{
+  success: boolean;
+  appointment?: Appointment;
+  sharedReports?: any[];
+  error?: string;
+}> => {
+  try {
+    const backendUrl = getBackendUrl();
+    const res = await fetchJson(`${backendUrl}/api/appointments/${encodeURIComponent(id)}`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      credentials: 'include'
+    });
+
+    if (!res.ok) {
+      return { success: false, error: res.data?.error || 'Failed to load appointment details' };
+    }
+
+    return {
+      success: true,
+      appointment: res.data.appointment,
+      sharedReports: res.data.sharedReports || []
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Connection error' };
+  }
+};
+
 export const updateAppointmentApi = async (
   id: string,
-  updates: Partial<Appointment>
+  updates: Partial<Appointment> & { rejectionReason?: string; cancellationReason?: string }
 ): Promise<{ success: boolean; appointment?: Appointment; error?: string }> => {
   try {
     const backendUrl = getBackendUrl();
-    const res = await fetchJson(`${backendUrl}/api/appointments/${id}`, {
+    const res = await fetchJson(`${backendUrl}/api/appointments/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -101,12 +131,35 @@ export const updateAppointmentApi = async (
   }
 };
 
-export const cancelAppointmentApi = async (
-  id: string
-): Promise<{ success: boolean; error?: string }> => {
+export const updateAppointmentConsentApi = async (
+  id: string,
+  sharedReportIds: string[]
+): Promise<{ success: boolean; appointment?: Appointment; error?: string }> => {
   try {
     const backendUrl = getBackendUrl();
-    const res = await fetchJson(`${backendUrl}/api/appointments/${id}`, {
+    const res = await fetchJson(`${backendUrl}/api/appointments/${encodeURIComponent(id)}/consent`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+      body: JSON.stringify({ sharedReportIds })
+    });
+
+    if (!res.ok) {
+      return { success: false, error: res.data?.error || 'Failed to update report consent' };
+    }
+
+    return { success: true, appointment: res.data.appointment };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Connection error' };
+  }
+};
+
+export const cancelAppointmentApi = async (
+  id: string
+): Promise<{ success: boolean; appointment?: Appointment; error?: string }> => {
+  try {
+    const backendUrl = getBackendUrl();
+    const res = await fetchJson(`${backendUrl}/api/appointments/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       headers: getAuthHeaders(),
       credentials: 'include'
@@ -116,7 +169,7 @@ export const cancelAppointmentApi = async (
       return { success: false, error: res.data?.error || 'Failed to cancel appointment' };
     }
 
-    return { success: true };
+    return { success: true, appointment: res.data.appointment };
   } catch (err: any) {
     return { success: false, error: err.message || 'Connection error' };
   }
@@ -209,7 +262,8 @@ export const getMedicalReportsApi = async (): Promise<{ success: boolean; count?
     const backendUrl = getBackendUrl();
     const res = await fetchJson(`${backendUrl}/api/ai/reports`, {
       method: 'GET',
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
+      credentials: 'include'
     });
 
     if (!res.ok) {
@@ -227,7 +281,8 @@ export const getMedicalReportByIdApi = async (id: string): Promise<{ success: bo
     const backendUrl = getBackendUrl();
     const res = await fetchJson(`${backendUrl}/api/ai/reports/${id}`, {
       method: 'GET',
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
+      credentials: 'include'
     });
 
     if (!res.ok) {
@@ -246,6 +301,7 @@ export const saveMedicalReportApi = async (reportData: any): Promise<{ success: 
     const res = await fetchJson(`${backendUrl}/api/ai/reports`, {
       method: 'POST',
       headers: getAuthHeaders(),
+      credentials: 'include',
       body: JSON.stringify(reportData)
     });
 
@@ -259,12 +315,59 @@ export const saveMedicalReportApi = async (reportData: any): Promise<{ success: 
   }
 };
 
+export const shareMedicalReportApi = async (
+  reportId: string,
+  doctorId: string,
+  doctorName?: string
+): Promise<{ success: boolean; report?: any; error?: string }> => {
+  try {
+    const backendUrl = getBackendUrl();
+    const res = await fetchJson(`${backendUrl}/api/ai/reports/${encodeURIComponent(reportId)}/share`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+      body: JSON.stringify({ doctorId, doctorName })
+    });
+
+    if (!res.ok) {
+      return { success: false, error: res.data?.error || 'Failed to share medical report' };
+    }
+
+    return { success: true, report: res.data.report };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Connection error' };
+  }
+};
+
+export const revokeMedicalReportShareApi = async (
+  reportId: string,
+  doctorId: string
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const backendUrl = getBackendUrl();
+    const res = await fetchJson(`${backendUrl}/api/ai/reports/${encodeURIComponent(reportId)}/share/${encodeURIComponent(doctorId)}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+      credentials: 'include'
+    });
+
+    if (!res.ok) {
+      return { success: false, error: res.data?.error || 'Failed to revoke report access' };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Connection error' };
+  }
+};
+
 export const deleteMedicalReportApi = async (id: string): Promise<{ success: boolean; error?: string; deletedReportId?: string }> => {
   try {
     const backendUrl = getBackendUrl();
     const res = await fetchJson(`${backendUrl}/api/ai/reports/${id}`, {
       method: 'DELETE',
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
+      credentials: 'include'
     });
 
     if (!res.ok) {

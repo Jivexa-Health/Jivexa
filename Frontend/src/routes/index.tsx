@@ -28,6 +28,7 @@ export const ROUTES = {
     AI_REPORT_ANALYZER: '/patient/ai-report-analyzer',
     APPOINTMENTS: '/patient/appointments',
     DOCTORS: '/patient/doctors',
+    DOCTOR_PROFILE: '/patient/doctors/:doctorId',
     HEALTH_RECORDS: '/patient/health-records',
     TIMELINE: '/patient/timeline',
     MEDICINES: '/patient/medicines',
@@ -35,6 +36,8 @@ export const ROUTES = {
     SETTINGS: '/patient/settings',
   },
   DOCTOR: {
+    LOGIN: '/login',
+    SIGNUP: '/signup?role=DOCTOR',
     DASHBOARD: '/doctor/dashboard',
     CONSULTATION: '/doctor/consultation/:appointmentId',
     SETTINGS: '/doctor/settings',

@@ -6,6 +6,8 @@ const {
   logoutUser,
   getMe,
   updateProfile,
+  changePassword,
+  getMyAuditLogs,
   sendOTP,
   verifyOTP,
   submitRoleVerification,
@@ -32,6 +34,9 @@ router.post('/submit-verification', submitRoleVerification);
 // Protected Auth routes
 router.get('/me', protect, getMe);
 router.put('/profile', protect, updateProfile);
+router.put('/change-password', protect, changePassword);
+router.post('/change-password', protect, changePassword);
+router.get('/audit-logs', protect, getMyAuditLogs);
 router.post('/profile-photo', protect, uploadProfilePhoto);
 router.delete('/profile-photo', protect, removeProfilePhoto);
 

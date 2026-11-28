@@ -4,6 +4,7 @@ import {
   Routes,
   Route,
   useLocation,
+  Navigate,
 } from 'react-router-dom';
 
 // Layout wrappers & Protected Route
@@ -55,6 +56,7 @@ import { PatientProfileEdit } from './pages/patient/Profile';
 import { HealthRecordsExplorer } from './pages/patient/HealthRecords';
 import { PatientAppointments } from './pages/patient/Appointments';
 import { DoctorDiscovery } from './pages/patient/Doctors';
+import { DoctorProfilePage } from './pages/patient/DoctorProfile';
 import { PatientMedicines } from './pages/patient/Medicines';
 import { PatientHealthTimeline } from './pages/patient/HealthTimeline';
 import { PatientSettings } from './pages/patient/Settings';
@@ -229,15 +231,7 @@ export const App: React.FC = () => {
             path="/for-doctors"
             element={
               <PublicLayout>
-                {isPatientMvpOnly() ? (
-                  <ComingSoonView 
-                    moduleName="Doctor Care" 
-                    category="doctor" 
-                    customDescription="Doctor Care and practitioner onboarding are coming soon. Jivexa is currently available for Patient AI Health testing." 
-                  />
-                ) : (
-                  <PublicForDoctors />
-                )}
+                <PublicForDoctors />
               </PublicLayout>
             }
           />
@@ -441,15 +435,7 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute allowedRoles={['PATIENT']}>
                 <DashboardLayout>
-                  {isPatientMvpOnly() ? (
-                    <ComingSoonView 
-                      moduleName="Clinical Appointments" 
-                      category="doctor" 
-                      customDescription="Doctor appointment booking is coming soon. Jivexa is currently available for Patient AI Health testing." 
-                    />
-                  ) : (
-                    <PatientAppointments />
-                  )}
+                  <PatientAppointments />
                 </DashboardLayout>
               </ProtectedRoute>
             }
@@ -460,15 +446,18 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute allowedRoles={['PATIENT']}>
                 <DashboardLayout>
-                  {isPatientMvpOnly() ? (
-                    <ComingSoonView 
-                      moduleName="Healthcare Directory" 
-                      category="directory" 
-                      customDescription="Healthcare Directory and Doctor Discovery are coming soon. Jivexa is currently available for Patient AI Health testing." 
-                    />
-                  ) : (
-                    <DoctorDiscovery />
-                  )}
+                  <DoctorDiscovery />
+                </DashboardLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/patient/doctors/:doctorId"
+            element={
+              <ProtectedRoute allowedRoles={['PATIENT']}>
+                <DashboardLayout>
+                  <DoctorProfilePage />
                 </DashboardLayout>
               </ProtectedRoute>
             }
@@ -665,15 +654,21 @@ export const App: React.FC = () => {
           {/* ================================================== */}
 
           <Route
+            path="/doctor/login"
+            element={<Navigate to="/login" replace />}
+          />
+
+          <Route
+            path="/doctor/signup"
+            element={<Navigate to="/signup?role=DOCTOR" replace />}
+          />
+
+          <Route
             path="/doctor/dashboard"
             element={
               <ProtectedRoute allowedRoles={['DOCTOR']}>
                 <DashboardLayout>
-                  {isPatientMvpOnly() ? (
-                    <ComingSoonView moduleName="Doctor Care" category="doctor" />
-                  ) : (
-                    <DoctorDashboard />
-                  )}
+                  <DoctorDashboard />
                 </DashboardLayout>
               </ProtectedRoute>
             }
@@ -684,11 +679,7 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute allowedRoles={['DOCTOR']}>
                 <DashboardLayout>
-                  {isPatientMvpOnly() ? (
-                    <ComingSoonView moduleName="Doctor Care" category="doctor" />
-                  ) : (
-                    <DoctorConsultation />
-                  )}
+                  <DoctorConsultation />
                 </DashboardLayout>
               </ProtectedRoute>
             }
@@ -699,11 +690,7 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute allowedRoles={['DOCTOR']}>
                 <DashboardLayout>
-                  {isPatientMvpOnly() ? (
-                    <ComingSoonView moduleName="Doctor Care" category="doctor" />
-                  ) : (
-                    <DoctorSettings />
-                  )}
+                  <DoctorSettings />
                 </DashboardLayout>
               </ProtectedRoute>
             }

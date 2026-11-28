@@ -31,7 +31,7 @@ export interface AIResponse {
   structuredData?: StructuredMedicalData;
 }
 
-import { getBackendUrl } from './nodeAuthService';
+import { getBackendUrl, getBackendUrls } from './nodeAuthService';
 
 const getApiBaseUrl = () => {
   return `${getBackendUrl()}/api/ai`;
@@ -480,31 +480,26 @@ export const streamAIHealthAssistant = async (
   userId = 'anonymous_user',
   conversationId?: string
 ): Promise<AIResponse> => {
-  // 1. Check for Emergency Symptoms
-  const emergencyKeywords = ['chest pain', 'breathing difficulty', 'shortness of breath', 'heart attack', 'stroke', 'unconscious', 'severe bleeding', 'sudden weakness', 'suicide', 'self harm'];
-  const isEmergency = emergencyKeywords.some(k => query.toLowerCase().includes(k));
-
-  if (isEmergency) {
-    const emergencyText = `EMERGENCY MEDICAL WARNING: The symptoms you described require immediate emergency evaluation.
-
-• Call 108 / 112 for an emergency ambulance right away.
-• Go to the nearest Hospital Emergency Room (ER) immediately.
-• Sit upright, loosen tight clothing, and do not drive yourself.`;
-    onChunk(emergencyText, 'JIVEXA Emergency Triage AI', true);
+  const cleanQuery = String(query || '').trim();
+  if (!cleanQuery) {
     return {
-      text: emergencyText,
-      isEmergency: true,
-      suggestions: ['Call 108 Emergency Ambulance', 'Find Nearest ER', 'Share Emergency Location'],
-      disclaimer: 'Educational healthcare information only.',
-      provider: 'JIVEXA Emergency Triage AI'
+      text: 'Please enter a health-related question so I can help.',
+      isEmergency: false,
+      suggestions: [],
+      disclaimer: '',
+      provider: 'JIVEXA Health AI',
+      errorCode: 'EMPTY_INPUT'
     };
   }
 
-  // 2. Call Jivexa Backend Google Gemini SSE Streaming Endpoint
+  // Call Jivexa Backend Google Gemini SSE Streaming Endpoint
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 45000);
+
   try {
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('jivexa_node_jwt_token') : null;
     const requestBody = JSON.stringify({
-      message: query.trim(),
+      message: cleanQuery,
       history: (history || [])
         .filter(h => typeof h?.text === 'string' && h.text.trim().length > 0)
         .map((h) => ({ sender: h.sender, text: h.text.trim() })),
@@ -512,33 +507,75 @@ export const streamAIHealthAssistant = async (
       conversationId
     });
 
+    const isLocalDev =
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1' ||
+        window.location.hostname === '0.0.0.0');
+
+    const backendRoots = getBackendUrls();
     const candidateBases = [
       getApiBaseUrl(),
-      '/api/ai',
-      'http://127.0.0.1:4000/api/ai',
-      'https://jivexa-main.onrender.com/api/ai'
+      ...backendRoots.map(root => (root ? `${root.replace(/\/$/, '')}/api/ai` : '/api/ai')),
+      ...(isLocalDev ? ['/api/ai'] : [])
     ];
     const uniqueBases = Array.from(new Set(candidateBases.filter(Boolean)));
 
     let response: Response | null = null;
     let lastNetworkErr: any = null;
+    let lastGatewayResponse: Response | null = null;
+
+    const postChat = (base: string) =>
+      fetch(`${base}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        credentials: 'include',
+        body: requestBody,
+        signal: controller.signal
+      });
 
     for (const base of uniqueBases) {
+      if (controller.signal.aborted) break;
       try {
-        const res = await fetch(`${base}/chat`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-          },
-          credentials: 'include',
-          body: requestBody
-        });
+        let res = await postChat(base);
+
+        // On transient cold-start/gateway errors (502/503/504) from a remote host, warm /api/health and retry once
+        if ((res.status === 502 || res.status === 503 || res.status === 504) && !base.startsWith('/')) {
+          const isViteLocal = base.includes('localhost') || base.includes('127.0.0.1');
+          if (!isViteLocal && !controller.signal.aborted) {
+            const rootUrl = base.replace(/\/api\/ai$/, '');
+            await fetch(`${rootUrl}/api/health`, { signal: controller.signal }).catch(() => {});
+            await new Promise(r => setTimeout(r, 1200));
+            if (!controller.signal.aborted) {
+              res = await postChat(base);
+            }
+          }
+        }
+
+        // Skip proxy gateway errors (502/503/504) so remaining healthy endpoints can answer
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          lastGatewayResponse = res;
+          continue;
+        }
+
+        // Ignore HTML SPA fallback pages masquerading as 200 OK
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        if (res.ok && contentType.includes('text/html')) {
+          continue;
+        }
+
         response = res;
         break;
       } catch (err) {
         lastNetworkErr = err;
       }
+    }
+
+    if (!response && lastGatewayResponse) {
+      response = lastGatewayResponse;
     }
 
     if (!response) {
@@ -568,9 +605,12 @@ export const streamAIHealthAssistant = async (
       } else if (response.status === 429) {
         errorCode = 'RATE_LIMIT_EXCEEDED';
         errorMsg = errorBody?.error || 'Rate limit reached: You have sent too many requests. Please wait a moment before sending another message.';
-      } else if (response.status === 503) {
+      } else if (response.status === 502 || response.status === 503 || response.status === 504) {
         errorCode = 'AI_TEMPORARILY_UNAVAILABLE';
-        errorMsg = 'JIVEXA AI service is temporarily overloaded or reconnecting. Please retry in a few moments.';
+        const backendDetail = typeof errorBody === 'object' ? (errorBody?.error || errorBody?.message) : '';
+        errorMsg = backendDetail && !String(backendDetail).includes('overloaded')
+          ? `${backendDetail} Please retry in a few moments.`
+          : 'JIVEXA AI service is temporarily overloaded or reconnecting. Please retry in a few moments.';
       } else {
         errorCode = 'BACKEND_ERROR';
         errorMsg = errorBody?.error || `JIVEXA backend error (${response.status}). Please try again.`;
@@ -587,7 +627,7 @@ export const streamAIHealthAssistant = async (
       };
     }
 
-    if (response.body) {
+      if (response.body) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let fullText = '';
@@ -598,6 +638,7 @@ export const streamAIHealthAssistant = async (
       let streamSuggestions: string[] = [];
       let streamErrorCode: string | undefined;
       let streamStructuredData: StructuredMedicalData | undefined;
+      let replacedFullText: string | null = null;
 
       while (!doneReading) {
         const { value, done } = await reader.read();
@@ -620,6 +661,9 @@ export const streamAIHealthAssistant = async (
               if (data.chunk) {
                 fullText += data.chunk;
                 onChunk(data.chunk, responseProvider, isEmergencyStream);
+              }
+              if (data.replaceText && typeof data.replaceText === 'string') {
+                replacedFullText = data.replaceText;
               }
               if (data.structuredData) {
                 streamStructuredData = data.structuredData;
@@ -648,9 +692,10 @@ export const streamAIHealthAssistant = async (
         }
       }
 
-      if (fullText.trim()) {
+      const finalText = replacedFullText || fullText;
+      if (finalText.trim()) {
         return {
-          text: fullText,
+          text: finalText,
           isEmergency: isEmergencyStream,
           suggestions: streamErrorCode ? [] : (streamStructuredData?.follow_up_questions || streamSuggestions),
           disclaimer: streamStructuredData?.disclaimer || '',
@@ -661,8 +706,25 @@ export const streamAIHealthAssistant = async (
       }
     }
   } catch (backendErr: any) {
+    clearTimeout(timeoutId);
     console.error('[JIVEXA AI] Network / Backend connection error:', backendErr);
-    const networkMsg = `Cannot connect to the JIVEXA backend service (${getApiBaseUrl()}). Please ensure the backend server is running on http://localhost:4000 and try again.`;
+    const emergencyFallbackKeywords = ['chest pain', 'difficulty breathing', 'shortness of breath', 'heart attack', 'stroke', 'unconscious', 'severe bleeding', 'suicide', 'self harm'];
+    if (emergencyFallbackKeywords.some(k => cleanQuery.toLowerCase().includes(k))) {
+      const emergencyText = `These symptoms may signal a medical emergency.\n\n- Call **112** (Emergency) or **108** (Ambulance) right away.\n- Go to the nearest hospital emergency room immediately.\n- Do not drive yourself.`;
+      onChunk(emergencyText, 'JIVEXA Emergency Safety Notice', true);
+      return {
+        text: emergencyText,
+        isEmergency: true,
+        suggestions: [],
+        disclaimer: '',
+        provider: 'JIVEXA Emergency Safety Notice'
+      };
+    }
+
+    const isTimeout = backendErr?.name === 'AbortError';
+    const networkMsg = isTimeout
+      ? 'The response timed out. Please try again in a moment.'
+      : `Cannot connect to the JIVEXA backend service (${getApiBaseUrl()}). Please ensure the backend server is running and try again.`;
     onChunk(networkMsg, 'JIVEXA Connection Notice', false);
     return {
       text: networkMsg,
@@ -670,8 +732,10 @@ export const streamAIHealthAssistant = async (
       suggestions: [],
       disclaimer: 'Connection status notice.',
       provider: 'JIVEXA Connection Notice',
-      errorCode: 'NETWORK_DISCONNECTED'
+      errorCode: isTimeout ? 'AI_TIMEOUT' : 'NETWORK_DISCONNECTED'
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   // Safe fallback when stream yields empty content without error

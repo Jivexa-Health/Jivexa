@@ -1,15 +1,16 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { 
-  nodeAuthLogin, 
-  nodeAuthSignup, 
-  nodeAuthLogout, 
-  nodeAuthGetMe, 
-  nodeAuthSendOTP, 
+import {
+  nodeAuthLogin,
+  nodeAuthSignup,
+  nodeAuthLogout,
+  nodeAuthGetMe,
+  nodeAuthSendOTP,
   nodeAuthVerifyOTP,
   nodeAuthSubmitVerification,
   nodeAuthResendVerification,
   nodeAuthUploadProfilePhoto,
-  nodeAuthRemoveProfilePhoto
+  nodeAuthRemoveProfilePhoto,
+  nodeAuthUpdateProfile
 } from '../services/nodeAuthService';
 
 export type UserRole = 'PATIENT' | 'DOCTOR' | 'PHARMACY' | 'ADMIN' | 'AMBULANCE_PARTNER';
@@ -26,6 +27,26 @@ export interface User {
   onboarded: boolean;
   phone?: string;
   dob?: string;
+  gender?: string;
+  address?: string;
+  age?: number | null;
+  doctorVerification?: {
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+    nmcRegistrationNumber?: string;
+    stateMedicalCouncil?: string;
+    verifiedAt?: string | null;
+    rejectionReason?: string;
+  } | null;
+  notificationPreferences?: {
+    inApp: boolean;
+    email: boolean;
+    appointmentReminders: boolean;
+  };
+  privacySettings?: {
+    shareHealthSummaryOnBooking: boolean;
+    allowEmergencyLookup: boolean;
+    consentLogsEnabled: boolean;
+  };
   professionalDetails?: any;
   vehicleDetails?: any;
   licenseDetails?: any;
@@ -59,13 +80,40 @@ interface AuthContextType {
   resendVerificationEmail: (email?: string) => Promise<AuthActionResult>;
   submitRoleVerification: (payload: Record<string, any>) => Promise<AuthActionResult>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
-  updateOnboarding: (data: Partial<User>) => Promise<{ success: boolean }>;
+  updateOnboarding: (data: Partial<User> & Record<string, any>) => Promise<{ success: boolean; error?: string }>;
+  refreshUser: () => Promise<void>;
   uploadProfilePhoto: (file: File) => Promise<{ success: boolean; avatarUrl?: string; error?: string }>;
   removeProfilePhoto: () => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const mapNodeUserToUser = (nodeUser: any): User => ({
+  id: nodeUser.id || nodeUser._id || `node_${Date.now()}`,
+  email: nodeUser.email,
+  name: nodeUser.name,
+  role: (nodeUser.role || 'PATIENT') as UserRole,
+  healthId: nodeUser.healthId || nodeUser.health_id,
+  verified: Boolean(nodeUser.emailVerified || nodeUser.verified),
+  emailVerified: Boolean(nodeUser.emailVerified),
+  accountStatus: nodeUser.accountStatus || 'ACTIVE',
+  onboarded: true,
+  phone: nodeUser.phone || '',
+  dob: nodeUser.dob || '',
+  gender: nodeUser.gender || '',
+  address: nodeUser.address || '',
+  age: nodeUser.age ?? null,
+  doctorVerification: nodeUser.doctorVerification || null,
+  notificationPreferences: nodeUser.notificationPreferences || { inApp: true, email: true, appointmentReminders: true },
+  privacySettings: nodeUser.privacySettings || { shareHealthSummaryOnBooking: false, allowEmergencyLookup: true, consentLogsEnabled: true },
+  professionalDetails: nodeUser.professionalDetails,
+  vehicleDetails: nodeUser.vehicleDetails,
+  licenseDetails: nodeUser.licenseDetails,
+  avatarUrl: nodeUser.avatarUrl || nodeUser.professionalDetails?.avatarUrl || nodeUser.usage?.avatarUrl || '',
+  createdAt: nodeUser.createdAt || nodeUser.created_at,
+  updatedAt: nodeUser.updatedAt || nodeUser.updated_at
+});
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -77,27 +125,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isInitializingRef.current = true;
 
     const initializeAuth = async () => {
-      // 1. Check Node.js / Express Cookie Session & Token
       try {
         const nodeRes = await nodeAuthGetMe();
         if (nodeRes.success && nodeRes.user) {
-          const userProfile: User = {
-            id: nodeRes.user.id || `node_${Date.now()}`,
-            email: nodeRes.user.email,
-            name: nodeRes.user.name,
-            role: nodeRes.user.role || 'PATIENT',
-            healthId: (nodeRes.user as any).healthId || (nodeRes.user as any).health_id,
-            verified: Boolean(nodeRes.user.emailVerified || nodeRes.user.verified),
-            emailVerified: Boolean(nodeRes.user.emailVerified),
-            accountStatus: nodeRes.user.accountStatus || 'ACTIVE',
-            onboarded: true,
-            professionalDetails: nodeRes.user.professionalDetails,
-            vehicleDetails: nodeRes.user.vehicleDetails,
-            licenseDetails: nodeRes.user.licenseDetails,
-            avatarUrl: nodeRes.user.avatarUrl || (nodeRes.user as any).professionalDetails?.avatarUrl || (nodeRes.user as any).usage?.avatarUrl || '',
-            createdAt: nodeRes.user.createdAt || (nodeRes.user as any).created_at,
-            updatedAt: nodeRes.user.updatedAt || (nodeRes.user as any).updated_at
-          };
+          const userProfile = mapNodeUserToUser(nodeRes.user);
           setUser(userProfile);
           localStorage.setItem('jivexa_session_user', JSON.stringify(userProfile));
           setIsLoading(false);
@@ -107,9 +138,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.warn('[Auth Context] Node session lookup skipped');
       }
 
-      // Check stored session user if available
       const savedUser = localStorage.getItem('jivexa_session_user');
-      if (savedUser) {
+      const token = localStorage.getItem('jivexa_node_jwt_token');
+      if (savedUser && token) {
         try {
           const parsed = JSON.parse(savedUser);
           setUser(parsed);
@@ -118,7 +149,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch (e) {}
       }
 
-      // If backend session lookup fails/is unauthenticated, clear local session storage and tokens
       setUser(null);
       localStorage.removeItem('jivexa_session_user');
       localStorage.removeItem('jivexa_node_jwt_token');
@@ -127,6 +157,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     initializeAuth();
   }, []);
+
+  const refreshUser = async () => {
+    try {
+      const nodeRes = await nodeAuthGetMe();
+      if (nodeRes.success && nodeRes.user) {
+        const userProfile = mapNodeUserToUser(nodeRes.user);
+        setUser(userProfile);
+        localStorage.setItem('jivexa_session_user', JSON.stringify(userProfile));
+      }
+    } catch {}
+  };
 
   // LOGIN IMPLEMENTATION (BACKEND ONLY)
   const login = async (email: string, password: string, role?: UserRole): Promise<AuthActionResult> => {
@@ -153,31 +194,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const nodeRes = await nodeAuthLogin(sanitizedEmail, sanitizedPassword, role);
       if (nodeRes.success && nodeRes.user) {
-        const userProfile: User = {
-          id: nodeRes.user.id || `node_${Date.now()}`,
-          email: nodeRes.user.email,
-          name: nodeRes.user.name,
-          role: (nodeRes.user.role || role || 'PATIENT') as UserRole,
-          healthId: (nodeRes.user as any).healthId || (nodeRes.user as any).health_id,
-          verified: true,
-          emailVerified: true,
-          accountStatus: nodeRes.user.accountStatus || 'ACTIVE',
-          onboarded: true,
-          professionalDetails: nodeRes.user.professionalDetails,
-          vehicleDetails: nodeRes.user.vehicleDetails,
-          licenseDetails: nodeRes.user.licenseDetails,
-          avatarUrl: nodeRes.user.avatarUrl || (nodeRes.user as any).professionalDetails?.avatarUrl || (nodeRes.user as any).usage?.avatarUrl || '',
-          createdAt: nodeRes.user.createdAt || (nodeRes.user as any).created_at,
-          updatedAt: nodeRes.user.updatedAt || (nodeRes.user as any).updated_at
-        };
+        const userProfile = mapNodeUserToUser(nodeRes.user);
         setUser(userProfile);
         localStorage.setItem('jivexa_session_user', JSON.stringify(userProfile));
         setIsLoading(false);
         return { success: true, role: userProfile.role };
       } else {
         setIsLoading(false);
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: nodeRes.error || 'Invalid credentials or login failed.',
           requireEmailConfirmation: nodeRes.requireEmailConfirmation || nodeRes.requireOtp,
           requireOtp: nodeRes.requireOtp,
@@ -196,9 +221,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // SIGNUP IMPLEMENTATION (BACKEND ONLY)
   const signup = async (
-    email: string, 
-    name: string, 
-    role: UserRole, 
+    email: string,
+    name: string,
+    role: UserRole,
     password?: string,
     extraFields?: Record<string, any>
   ): Promise<AuthActionResult> => {
@@ -258,29 +283,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const nodeRes = await nodeAuthSignup(sanitizedName, sanitizedEmail, sanitizedPassword, role, extraFields);
       if (nodeRes.success) {
         if (nodeRes.user) {
-          const userProfile: User = {
-            id: nodeRes.user.id || `usr_${Date.now()}`,
-            email: nodeRes.user.email || sanitizedEmail,
-            name: nodeRes.user.name || sanitizedName,
-            role: (nodeRes.user.role || role) as UserRole,
-            healthId: (nodeRes.user as any).healthId || (nodeRes.user as any).health_id,
-            verified: Boolean(nodeRes.user.verified ?? true),
-            emailVerified: Boolean(nodeRes.user.emailVerified ?? true),
-            accountStatus: nodeRes.user.accountStatus || 'ACTIVE',
-            onboarded: true,
-            professionalDetails: nodeRes.user.professionalDetails || (extraFields?.nmcRegistrationNumber ? { nmcRegistrationNumber: extraFields.nmcRegistrationNumber, stateMedicalCouncil: extraFields.stateMedicalCouncil } : undefined),
-            vehicleDetails: nodeRes.user.vehicleDetails || (extraFields?.vehicleNumber ? { vehicleNumber: extraFields.vehicleNumber } : undefined),
-            licenseDetails: nodeRes.user.licenseDetails || (extraFields?.drugLicenseNumber ? { drugLicenseNumber: extraFields.drugLicenseNumber, gstin: extraFields.gstin } : undefined),
-            avatarUrl: nodeRes.user.avatarUrl || '',
-            createdAt: nodeRes.user.createdAt || (nodeRes.user as any).created_at || new Date().toISOString(),
-            updatedAt: nodeRes.user.updatedAt || (nodeRes.user as any).updated_at || new Date().toISOString()
-          };
-
+          const userProfile = mapNodeUserToUser(nodeRes.user);
           setUser(userProfile);
           localStorage.setItem('jivexa_session_user', JSON.stringify(userProfile));
           setIsLoading(false);
-          return { 
-            success: true, 
+          return {
+            success: true,
             role: userProfile.role,
             requireEmailConfirmation: false,
             requireOtp: false,
@@ -298,8 +306,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } else {
         setIsLoading(false);
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: nodeRes.error || 'Registration failed.',
           requireEmailConfirmation: false,
           requireOtp: false
@@ -316,24 +324,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const verifyEmail = async (code: string, emailTarget?: string): Promise<AuthActionResult> => {
     setIsLoading(true);
-
     try {
       const targetEmail = emailTarget || user?.email || '';
       const nodeRes = await nodeAuthVerifyOTP(targetEmail, code);
       if (nodeRes.success && nodeRes.user) {
-        const userProfile: User = {
-          id: nodeRes.user.id || `node_${Date.now()}`,
-          email: nodeRes.user.email,
-          name: nodeRes.user.name,
-          role: nodeRes.user.role || 'PATIENT',
-          verified: true,
-          emailVerified: true,
-          accountStatus: nodeRes.user.accountStatus || 'ACTIVE',
-          onboarded: true,
-          professionalDetails: nodeRes.user.professionalDetails,
-          vehicleDetails: nodeRes.user.vehicleDetails,
-          licenseDetails: nodeRes.user.licenseDetails
-        };
+        const userProfile = mapNodeUserToUser(nodeRes.user);
         setUser(userProfile);
         localStorage.setItem('jivexa_session_user', JSON.stringify(userProfile));
         setIsLoading(false);
@@ -353,7 +348,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!targetEmail || !targetEmail.includes('@') || !targetEmail.includes('.')) {
       return { success: false, error: 'Please enter a valid, complete email address (e.g. user@domain.com)' };
     }
-
     try {
       const nodeRes = await nodeAuthSendOTP(targetEmail);
       if (nodeRes.success) {
@@ -371,14 +365,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!targetEmail || !targetEmail.includes('@') || !targetEmail.includes('.')) {
       return { success: false, error: 'Please enter a valid email address (e.g. user@domain.com)' };
     }
-
     try {
       const nodeRes = await nodeAuthResendVerification(targetEmail);
       if (nodeRes.success) {
-        return { 
-          success: true, 
-          message: nodeRes.message || 'Verification email resent successfully.', 
-          maskedEmail: nodeRes.maskedEmail 
+        return {
+          success: true,
+          message: nodeRes.message || 'Verification email resent successfully.',
+          maskedEmail: nodeRes.maskedEmail
         };
       }
       return { success: false, error: nodeRes.error || 'Failed to resend verification email.' };
@@ -394,17 +387,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: false, error: nodeRes.error || 'Verification submission failed.' };
       }
       if (user) {
-        const updated: User = {
-          ...user,
-          accountStatus: nodeRes.accountStatus || 'PENDING_REVIEW',
-          professionalDetails: payload.nmcRegistrationNumber ? { nmcRegistrationNumber: payload.nmcRegistrationNumber, stateMedicalCouncil: payload.stateMedicalCouncil } : user.professionalDetails,
-          vehicleDetails: payload.vehicleNumber ? { vehicleNumber: payload.vehicleNumber } : user.vehicleDetails,
-          licenseDetails: payload.drugLicenseNumber ? { drugLicenseNumber: payload.drugLicenseNumber, gstin: payload.gstin } : user.licenseDetails
-        };
-        setUser(updated);
-        localStorage.setItem('jivexa_session_user', JSON.stringify(updated));
+        await refreshUser();
       }
-      return { success: true, message: nodeRes.message || 'Verification submitted.', accountStatus: nodeRes.accountStatus || 'PENDING_REVIEW' };
+      return { success: true, message: nodeRes.message || 'Verification submitted.', accountStatus: nodeRes.accountStatus || 'PENDING_VERIFICATION' };
     } catch (e: any) {
       return { success: false, error: e.message || 'Failed to submit verification details.' };
     }
@@ -415,7 +400,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!sanitizedEmail || !sanitizedEmail.includes('@')) {
       return { success: false, error: 'Please enter a valid email address.' };
     }
-
     try {
       const sendRes = await sendOTP(sanitizedEmail);
       if (sendRes.success) {
@@ -427,8 +411,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const updateOnboarding = async (data: Partial<User>): Promise<{ success: boolean }> => {
-    if (!user) return { success: false };
+  const updateOnboarding = async (data: Partial<User> & Record<string, any>): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Not authenticated' };
+
+    const apiRes = await nodeAuthUpdateProfile(data);
+    if (apiRes.success && apiRes.user) {
+      const updatedUser = mapNodeUserToUser(apiRes.user);
+      setUser(updatedUser);
+      localStorage.setItem('jivexa_session_user', JSON.stringify(updatedUser));
+      return { success: true };
+    }
+
+    if (apiRes.error) {
+      return { success: false, error: apiRes.error };
+    }
 
     const updatedUser = { ...user, ...data, onboarded: true, updatedAt: new Date().toISOString() };
     setUser(updatedUser);
@@ -492,6 +488,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         submitRoleVerification,
         resetPassword,
         updateOnboarding,
+        refreshUser,
         uploadProfilePhoto,
         removeProfilePhoto,
         logout

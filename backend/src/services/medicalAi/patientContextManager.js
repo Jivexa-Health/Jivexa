@@ -1,46 +1,60 @@
 /**
  * JIVEXA Health AI - Patient Clinical Context Management Layer
- * 
- * Aggregates and sanitizes patient clinical profile data from MongoDB:
- * - HealthId records (allergies, chronic illnesses, active medications, vitals)
- * - Recent MedicalReport lab test abnormalities
- * - Strict PII scrubbing (removes names, phone numbers, addresses, government IDs)
- * - Injects sanitized clinical context into the AI reasoning prompt
+ *
+ * Optimized for low-latency chat:
+ * - Parallel MongoDB queries (HealthId + MedicalReport) with field projection
+ * - Short-TTL (60s) in-memory cache per userId to avoid repeated DB round-trips
+ * - Strict PII scrubbing before prompt injection
  */
 
 const mongoose = require('mongoose');
 const HealthId = require('../../models/HealthId');
 const MedicalReport = require('../../models/MedicalReport');
 
+const CONTEXT_CACHE_TTL_MS = 60 * 1000;
+const MAX_CACHE_ENTRIES = 200;
+const contextCache = new Map();
+
+const EMPTY_CONTEXT = {
+  hasContext: false,
+  allergies: [],
+  chronicConditions: [],
+  currentMedications: [],
+  recentLabAbnormalities: [],
+  formattedContextString: 'No prior clinical profile recorded for this patient.'
+};
+
+const invalidatePatientContextCache = (userId) => {
+  if (userId) contextCache.delete(String(userId));
+};
+
 /**
  * Retrieves sanitized clinical background for a given user.
- * 
- * @param {string} userId - User identifier
- * @returns {Promise<Object>} Sanitized clinical context and prompt string
  */
 const getPatientClinicalContext = async (userId) => {
   if (!userId || mongoose.connection.readyState !== 1) {
-    return {
-      hasContext: false,
-      allergies: [],
-      chronicConditions: [],
-      currentMedications: [],
-      recentLabAbnormalities: [],
-      formattedContextString: 'No prior clinical profile recorded for this patient.'
-    };
+    return EMPTY_CONTEXT;
+  }
+
+  const userIdStr = String(userId);
+  const cached = contextCache.get(userIdStr);
+  if (cached && Date.now() - cached.cachedAt < CONTEXT_CACHE_TTL_MS) {
+    return cached.value;
   }
 
   try {
-    const userIdStr = String(userId);
-
-    // 1. Fetch HealthId profile (Allergies, Chronic Conditions, Medications)
-    const healthIdDoc = await HealthId.findOne({ userId: userIdStr }).lean().catch(() => null);
-
-    // 2. Fetch latest medical report with abnormal parameters
-    const latestReport = await MedicalReport.findOne({ patientId: userIdStr })
-      .sort({ createdAt: -1 })
-      .lean()
-      .catch(() => null);
+    // Run both lookups in parallel with lean projections for minimum DB latency
+    const [healthIdDoc, latestReport] = await Promise.all([
+      HealthId.findOne({ userId: userIdStr })
+        .select('healthProfile gender bloodGroup')
+        .lean()
+        .catch(() => null),
+      MedicalReport.findOne({ patientId: userIdStr })
+        .sort({ createdAt: -1 })
+        .select('abnormalFindings parameters')
+        .lean()
+        .catch(() => null)
+    ]);
 
     const allergies = healthIdDoc?.healthProfile?.allergies?.filter(Boolean) || [];
     const chronicConditions = healthIdDoc?.healthProfile?.chronicConditions?.filter(Boolean) || [];
@@ -49,7 +63,6 @@ const getPatientClinicalContext = async (userId) => {
     const gender = healthIdDoc?.gender && healthIdDoc.gender !== 'Unspecified' ? healthIdDoc.gender : null;
     const bloodGroup = healthIdDoc?.bloodGroup || null;
 
-    // Extract abnormal lab parameters
     const recentLabAbnormalities = [];
     if (latestReport) {
       const abnormalItems = [
@@ -77,42 +90,18 @@ const getPatientClinicalContext = async (userId) => {
       bloodPressure
     );
 
-    // Build concise, PII-sanitized prompt injection
-    const promptLines = ['PATIENT CLINICAL CONTEXT (Use for allergy/interaction checks & tailored guidance):'];
+    const promptLines = ['PATIENT CONTEXT (use only if relevant):'];
     if (gender) promptLines.push(`- Gender: ${gender}`);
     if (bloodGroup) promptLines.push(`- Blood Group: ${bloodGroup}`);
-    if (bloodPressure) promptLines.push(`- Recorded BP: ${bloodPressure}`);
-    
-    if (chronicConditions.length > 0) {
-      promptLines.push(`- Chronic Conditions: ${chronicConditions.join(', ')}`);
-    } else {
-      promptLines.push(`- Chronic Conditions: None recorded`);
-    }
-
-    if (allergies.length > 0) {
-      promptLines.push(`- KNOWN ALLERGIES (CRITICAL): ${allergies.join(', ')}`);
-    } else {
-      promptLines.push(`- Known Allergies: None recorded`);
-    }
-
-    if (currentMedications.length > 0) {
-      promptLines.push(`- Current Medications: ${currentMedications.join(', ')}`);
-    } else {
-      promptLines.push(`- Current Medications: None recorded`);
-    }
-
+    if (bloodPressure) promptLines.push(`- BP: ${bloodPressure}`);
+    if (chronicConditions.length > 0) promptLines.push(`- Conditions: ${chronicConditions.join(', ')}`);
+    if (allergies.length > 0) promptLines.push(`- ALLERGIES: ${allergies.join(', ')}`);
+    if (currentMedications.length > 0) promptLines.push(`- Medications: ${currentMedications.join(', ')}`);
     if (recentLabAbnormalities.length > 0) {
-      const labsStr = recentLabAbnormalities
-        .map(l => `${l.name}: ${l.value} ${l.unit} [${l.flag}]`)
-        .join('; ');
-      promptLines.push(`- Recent Lab Out-of-Range Markers: ${labsStr}`);
+      promptLines.push(`- Recent Abnormal Labs: ${recentLabAbnormalities.map(l => `${l.name}: ${l.value} ${l.unit} [${l.flag}]`).join('; ')}`);
     }
 
-    const formattedContextString = hasContext 
-      ? promptLines.join('\n') 
-      : 'No prior clinical profile recorded for this patient.';
-
-    return {
+    const result = {
       hasContext,
       gender,
       bloodGroup,
@@ -120,21 +109,23 @@ const getPatientClinicalContext = async (userId) => {
       chronicConditions,
       currentMedications,
       recentLabAbnormalities,
-      formattedContextString
+      formattedContextString: hasContext ? promptLines.join('\n') : EMPTY_CONTEXT.formattedContextString
     };
+
+    if (contextCache.size >= MAX_CACHE_ENTRIES) {
+      const oldestKey = contextCache.keys().next().value;
+      if (oldestKey) contextCache.delete(oldestKey);
+    }
+    contextCache.set(userIdStr, { cachedAt: Date.now(), value: result });
+
+    return result;
   } catch (error) {
-    console.warn('[patientContextManager] Error retrieving patient clinical context:', error.message);
-    return {
-      hasContext: false,
-      allergies: [],
-      chronicConditions: [],
-      currentMedications: [],
-      recentLabAbnormalities: [],
-      formattedContextString: 'No clinical profile available due to temporary database retrieval error.'
-    };
+    console.warn('[patientContextManager] Retrieval notice:', error.message);
+    return EMPTY_CONTEXT;
   }
 };
 
 module.exports = {
-  getPatientClinicalContext
+  getPatientClinicalContext,
+  invalidatePatientContextCache
 };

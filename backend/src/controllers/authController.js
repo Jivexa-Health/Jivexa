@@ -5,14 +5,15 @@ const { MongoDb, isDatabaseConnected } = require('../services/mongoDbService');
 const User = require('../models/User');
 const HealthId = require('../models/HealthId');
 const { parseUserAgent, getClientIp, getApproximateLocation, formatLastActive } = require('../utils/deviceDetector');
-const { signupSchema, loginSchema, updateProfileSchema } = require('../validators/userValidators');
+const { signupSchema, loginSchema, updateProfileSchema, changePasswordSchema } = require('../validators/userValidators');
 const { resendVerificationEmail } = require('../services/emailService');
-const { 
-  createOTPEntry, 
-  verifyOTPEntry, 
-  maskEmail, 
-  generateRoleId, 
-  OTP_RESEND_COOLDOWN_SECONDS 
+const { recordAuditLog } = require('../services/auditService');
+const {
+  createOTPEntry,
+  verifyOTPEntry,
+  maskEmail,
+  generateRoleId,
+  OTP_RESEND_COOLDOWN_SECONDS
 } = require('../services/otpService');
 
 const JWT_SECRET = config.auth.jwtSecret;
@@ -24,6 +25,9 @@ const generateCanonicalHealthId = () => {
   const numPart = Math.floor(100000 + Math.random() * 900000);
   return `JIV-${new Date().getFullYear()}-${numPart}`;
 };
+
+const DEFAULT_DOCTOR_SLOTS = ['09:00 AM', '09:30 AM', '10:00 AM', '10:30 AM', '11:30 AM', '02:00 PM', '03:30 PM', '05:00 PM'];
+const DEFAULT_DOCTOR_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // TEMPORARILY DISABLED FOR LAUNCH
 // Re-enable OTP after launch by setting OTP_ENABLED=true in backend/.env.
@@ -113,6 +117,13 @@ const registerUser = async (req, res) => {
 
     const { name, age, email, password, role } = validationResult.data;
     const userRole = (role || 'PATIENT').toUpperCase();
+    if (userRole === 'AMBULANCE_PARTNER' || userRole === 'PHARMACY') {
+      return res.status(403).json({
+        success: false,
+        error: `${userRole === 'AMBULANCE_PARTNER' ? 'Ambulance' : 'Pharmacy'} registration is coming soon and currently inactive.`,
+        message: `${userRole === 'AMBULANCE_PARTNER' ? 'Ambulance' : 'Pharmacy'} registration is coming soon and currently inactive.`
+      });
+    }
     const cleanEmail = email.toLowerCase().trim();
 
     // Check if user already exists in MongoDB
@@ -140,22 +151,95 @@ const registerUser = async (req, res) => {
       password: hashedPassword,
       role: userRole,
       age: age !== undefined ? age : null,
-      phone: req.body.phone || '',
-      healthId: generatedHealthId,
+      dob: req.body.dob || '',
+      gender: req.body.gender || '',
+      address: req.body.address || '',
+      phone: req.body.phone || req.body.phoneNumber || '',
+      ...(generatedHealthId ? { healthId: generatedHealthId } : {}),
       emailVerified: true,
       verified: true,
-      accountStatus: userRole === 'PATIENT' ? 'ACTIVE' : 'PENDING_DOCUMENT_REVIEW',
+      accountStatus: userRole === 'PATIENT' ? 'ACTIVE' : 'PENDING_VERIFICATION',
+      notificationPreferences: { inApp: true, email: true, appointmentReminders: true },
+      privacySettings: { shareHealthSummaryOnBooking: false, allowEmergencyLookup: true, consentLogsEnabled: true },
       usage: { tokenUsed: 0, tokenLimit: 10000, totalTokenUsed: 0 }
     };
 
     if (userRole === 'DOCTOR') {
-      userProfilePayload.professionalDetails = req.body.professionalDetails || {
-        specialization: req.body.specialization || 'General Practitioner',
-        experienceYears: req.body.experienceYears || 0,
-        nmcRegistrationNumber: req.body.nmcRegistrationNumber,
-        stateMedicalCouncil: req.body.stateMedicalCouncil || 'State Medical Council',
-        consultationFee: req.body.consultationFee || 500,
-        qualification: req.body.qualification || 'MBBS'
+      const incomingProf = req.body.professionalDetails || {};
+      const spec = String(incomingProf.specialization || req.body.specialization || '').trim();
+      const quals = String(incomingProf.qualifications || incomingProf.qualification || req.body.qualifications || req.body.qualification || '').trim();
+      const exp = Number(incomingProf.experienceYears ?? req.body.experienceYears ?? 0);
+      const fee = Number(incomingProf.consultationFee ?? req.body.consultationFee ?? 500);
+      const clinicName = String(incomingProf.clinicName || incomingProf.hospitalName || req.body.clinicName || req.body.hospitalName || '').trim();
+      const clinicAddress = String(incomingProf.clinicAddress || req.body.clinicAddress || req.body.clinicDetails || '').trim();
+      const city = String(incomingProf.city || req.body.city || '').trim();
+      const state = String(incomingProf.state || req.body.state || '').trim();
+      const pincode = String(incomingProf.pincode || req.body.pincode || '').trim();
+      const nmcNum = String(incomingProf.nmcRegistrationNumber || incomingProf.registrationNumber || req.body.nmcRegistrationNumber || req.body.registrationNumber || '').trim();
+      const council = String(incomingProf.stateMedicalCouncil || req.body.stateMedicalCouncil || 'State Medical Council').trim();
+      const phoneVal = String(req.body.phone || req.body.phoneNumber || '').trim();
+
+      let location = undefined;
+      const lat = incomingProf.latitude ?? req.body.latitude;
+      const lng = incomingProf.longitude ?? req.body.longitude;
+      if (lat !== undefined && lng !== undefined && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
+        location = {
+          type: 'Point',
+          coordinates: [Number(lng), Number(lat)]
+        };
+      } else if (incomingProf.location?.coordinates && Array.isArray(incomingProf.location.coordinates)) {
+        location = {
+          type: 'Point',
+          coordinates: [Number(incomingProf.location.coordinates[0]), Number(incomingProf.location.coordinates[1])]
+        };
+      }
+
+      if (!phoneVal || !quals || !spec || !nmcNum || (!clinicName && !clinicAddress)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Doctor registration requires phone number, medical qualification, specialization, registration number, and clinic/hospital details.',
+          message: 'Doctor registration requires phone number, medical qualification, specialization, registration number, and clinic/hospital details.'
+        });
+      }
+      const cTypes = Array.isArray(incomingProf.consultationTypes) && incomingProf.consultationTypes.length > 0
+        ? incomingProf.consultationTypes
+        : ['In-Person', 'Video'];
+      const availDays = Array.isArray(incomingProf.availableDays) && incomingProf.availableDays.length > 0
+        ? incomingProf.availableDays
+        : DEFAULT_DOCTOR_DAYS;
+      const availSlots = Array.isArray(incomingProf.availableSlots) && incomingProf.availableSlots.length > 0
+        ? incomingProf.availableSlots
+        : DEFAULT_DOCTOR_SLOTS;
+
+      userProfilePayload.professionalDetails = {
+        specialization: spec,
+        qualifications: quals,
+        experienceYears: Number.isFinite(exp) ? exp : 0,
+        nmcRegistrationNumber: nmcNum,
+        stateMedicalCouncil: council,
+        consultationFee: Number.isFinite(fee) ? fee : 500,
+        consultationTypes: cTypes,
+        clinicName,
+        clinicAddress,
+        city,
+        state,
+        pincode,
+        ...(location ? { location } : {}),
+        availableDays: availDays,
+        availableSlots: availSlots,
+        availabilityText: incomingProf.availabilityText || `${availDays.join(', ')} (9:00 AM - 5:00 PM)`,
+        slotDurationMinutes: Number(incomingProf.slotDurationMinutes) || 30,
+        about: incomingProf.about || '',
+        languages: Array.isArray(incomingProf.languages) ? incomingProf.languages : ['English']
+      };
+      // Doctors always start PENDING verification until reviewed/approved
+      userProfilePayload.doctorVerification = {
+        status: 'PENDING',
+        nmcRegistrationNumber: nmcNum,
+        stateMedicalCouncil: council,
+        verifiedAt: null,
+        verifiedBy: '',
+        rejectionReason: ''
       };
     } else if (userRole === 'AMBULANCE_PARTNER') {
       userProfilePayload.vehicleDetails = req.body.vehicleDetails || {
@@ -194,6 +278,16 @@ const registerUser = async (req, res) => {
 
     // 4. Record initial login session for registering device
     const sessionId = await recordLoginSession(userRecord, req);
+
+    await recordAuditLog({
+      actorId: userRecord._id || userRecord.id,
+      actorRole: userRole,
+      action: `${userRole}_REGISTER`,
+      targetType: 'User',
+      targetId: userRecord._id || userRecord.id,
+      details: { email: cleanEmail },
+      req
+    });
 
     // 5. Generate JWT auth token & set HTTP-only cookie
     const token = generateToken(
@@ -301,7 +395,6 @@ const verifyOTP = async (req, res) => {
 
     const otpCode = (code || inputToken || '').trim();
 
-    // If OTP verification enabled and user has OTP details, verify against bcrypt hash
     if (isOtpEnabled() && targetUser.otpDetails && otpCode) {
       const otpResult = await verifyOTPEntry(targetUser.otpDetails, otpCode, 'signup_verification');
       if (!otpResult.valid) {
@@ -324,7 +417,12 @@ const verifyOTP = async (req, res) => {
     if (targetUser.role === 'PATIENT') {
       targetUser.accountStatus = 'ACTIVE';
     } else if (targetUser.role === 'DOCTOR') {
-      targetUser.accountStatus = targetUser.professionalDetails?.nmcRegistrationNumber ? 'VERIFIED' : 'PENDING_DOCUMENT_REVIEW';
+      // Preserve existing verification status; never auto-approve unverified doctors on OTP verify
+      if (targetUser.doctorVerification?.status === 'APPROVED') {
+        targetUser.accountStatus = 'VERIFIED';
+      } else {
+        targetUser.accountStatus = 'PENDING_VERIFICATION';
+      }
     } else if (targetUser.role === 'AMBULANCE_PARTNER') {
       targetUser.accountStatus = targetUser.vehicleDetails?.vehicleNumber ? 'VERIFIED' : 'PENDING_DOCUMENT_REVIEW';
     } else if (targetUser.role === 'PHARMACY') {
@@ -349,7 +447,7 @@ const verifyOTP = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `🎉 Email verified successfully! Unique Role ID: ${targetUser.roleId}`,
+      message: `Email verified successfully! Unique Role ID: ${targetUser.roleId}`,
       token,
       user: userAuthData
     });
@@ -378,11 +476,21 @@ const submitRoleVerification = async (req, res) => {
 
     if (targetUser.role === 'DOCTOR' && nmcRegistrationNumber) {
       targetUser.professionalDetails = {
+        ...(targetUser.professionalDetails || {}),
         nmcRegistrationNumber,
         stateMedicalCouncil: stateMedicalCouncil || 'State Medical Council',
-        verifiedAt: new Date()
+        submittedAt: new Date()
       };
-      targetUser.accountStatus = 'VERIFIED';
+      // Doctors must go through secure verification review before appearing as approved
+      targetUser.doctorVerification = {
+        ...(targetUser.doctorVerification || {}),
+        status: targetUser.doctorVerification?.status === 'APPROVED' ? 'APPROVED' : 'PENDING',
+        nmcRegistrationNumber,
+        stateMedicalCouncil: stateMedicalCouncil || 'State Medical Council'
+      };
+      if (targetUser.doctorVerification.status !== 'APPROVED') {
+        targetUser.accountStatus = 'PENDING_VERIFICATION';
+      }
     } else if (targetUser.role === 'AMBULANCE_PARTNER' && vehicleNumber) {
       targetUser.vehicleDetails = {
         vehicleNumber,
@@ -402,11 +510,24 @@ const submitRoleVerification = async (req, res) => {
 
     await targetUser.save();
 
+    await recordAuditLog({
+      actorId: targetUser._id || targetUser.id,
+      actorRole: targetUser.role,
+      action: 'VERIFICATION_SUBMITTED',
+      targetType: 'User',
+      targetId: targetUser._id || targetUser.id,
+      details: { accountStatus: targetUser.accountStatus },
+      req
+    });
+
     return res.json({
       success: true,
-      message: '🎉 Credentials submitted and account verified!',
+      message: targetUser.role === 'DOCTOR' && targetUser.doctorVerification?.status !== 'APPROVED'
+        ? 'Verification credentials submitted and pending approval review.'
+        : 'Credentials submitted successfully.',
       roleId: targetUser.roleId,
-      accountStatus: targetUser.accountStatus
+      accountStatus: targetUser.accountStatus,
+      doctorVerification: targetUser.doctorVerification || null
     });
   } catch (error) {
     console.error('[Submit Verification Error]:', error);
@@ -414,7 +535,7 @@ const submitRoleVerification = async (req, res) => {
   }
 };
 
-// @desc    Authenticate user & get JWT token (Login with Brute-Force Protection & 2FA)
+// @desc    Authenticate user & get JWT token (Unified Login with Brute-Force Protection)
 // @route   POST /api/auth/login
 // @access  Public
 const loginUser = async (req, res) => {
@@ -482,7 +603,7 @@ const loginUser = async (req, res) => {
       if (user.role === 'PATIENT') {
         user.accountStatus = 'ACTIVE';
       } else if (user.role === 'DOCTOR') {
-        user.accountStatus = user.professionalDetails?.nmcRegistrationNumber ? 'VERIFIED' : 'PENDING_DOCUMENT_REVIEW';
+        user.accountStatus = user.doctorVerification?.status === 'APPROVED' ? 'VERIFIED' : 'PENDING_VERIFICATION';
       } else if (user.role === 'AMBULANCE_PARTNER') {
         user.accountStatus = user.vehicleDetails?.vehicleNumber ? 'VERIFIED' : 'PENDING_DOCUMENT_REVIEW';
       } else if (user.role === 'PHARMACY') {
@@ -500,6 +621,16 @@ const loginUser = async (req, res) => {
 
     // Record authenticated login session
     const sessionId = await recordLoginSession(user, req);
+
+    await recordAuditLog({
+      actorId: user._id || user.id,
+      actorRole: user.role,
+      action: `${user.role}_LOGIN`,
+      targetType: 'User',
+      targetId: user._id || user.id,
+      details: { role: user.role },
+      req
+    });
 
     const token = generateToken(
       user._id || user.id,
@@ -540,6 +671,16 @@ const logoutUser = async (req, res) => {
         { $set: { isRevoked: true, revokedAt: new Date() } }
       ).catch(() => {});
     }
+    if (req.user) {
+      await recordAuditLog({
+        actorId: req.user._id || req.user.id,
+        actorRole: req.user.role,
+        action: `${req.user.role}_LOGOUT`,
+        targetType: 'Session',
+        targetId: sessionId || '',
+        req
+      });
+    }
   } catch (_) {}
 
   res.clearCookie('token', {
@@ -566,7 +707,7 @@ const getUserSessions = async (req, res) => {
       });
     }
 
-    if (!isDatabaseConnected()) {
+    if (!isDatabaseConnected() && (!MongoDb || !MongoDb.isAvailable())) {
       return res.status(200).json({
         success: true,
         count: 0,
@@ -641,7 +782,6 @@ const revokeSession = async (req, res) => {
     session.revokedAt = new Date();
     await session.save();
 
-    // If the user revoked their own current device session, clear the auth cookie
     if (req.currentSessionId && req.currentSessionId === session.sessionId) {
       res.clearCookie('token', {
         httpOnly: true,
@@ -725,11 +865,19 @@ const getMe = async (req, res) => {
       roleId: req.user.roleId,
       name: req.user.name,
       age: req.user.age,
+      dob: req.user.dob || '',
+      gender: req.user.gender || '',
+      phone: req.user.phone || '',
+      address: req.user.address || '',
       email: req.user.email,
       role: req.user.role,
       emailVerified: req.user.emailVerified,
       verified: req.user.verified,
       accountStatus: req.user.accountStatus,
+      doctorVerification: req.user.doctorVerification || null,
+      notificationPreferences: req.user.notificationPreferences || { inApp: true, email: true, appointmentReminders: true },
+      privacySettings: req.user.privacySettings || { shareHealthSummaryOnBooking: false, allowEmergencyLookup: true, consentLogsEnabled: true },
+      professionalDetails: req.user.professionalDetails || null,
       avatarUrl: req.user.avatarUrl || req.user.professionalDetails?.avatarUrl || req.user.usage?.avatarUrl || '',
       createdAt: req.user.createdAt || req.user.created_at,
       updatedAt: req.user.updatedAt || req.user.updated_at
@@ -747,7 +895,7 @@ const getMe = async (req, res) => {
   }
 };
 
-// @desc    Update user profile
+// @desc    Update user profile & account preferences
 // @route   PUT /api/auth/profile
 // @access  Private
 const updateProfile = async (req, res) => {
@@ -764,7 +912,21 @@ const updateProfile = async (req, res) => {
       });
     }
 
-    const { name, age, email } = validationResult.data;
+    const {
+      name,
+      age,
+      email,
+      phone,
+      dob,
+      gender,
+      address,
+      bloodGroup,
+      allergies,
+      conditions,
+      emergencyContact,
+      notificationPreferences,
+      privacySettings
+    } = validationResult.data;
 
     const user = await MongoDb.users.findById(req.user._id || req.user.id);
     if (!user) {
@@ -774,8 +936,67 @@ const updateProfile = async (req, res) => {
     if (name) user.name = name;
     if (age !== undefined) user.age = age;
     if (email) user.email = email.toLowerCase().trim();
+    if (phone !== undefined) user.phone = phone;
+    if (dob !== undefined) user.dob = dob;
+    if (gender !== undefined) user.gender = gender;
+    if (address !== undefined) user.address = address;
+
+    if (notificationPreferences) {
+      user.notificationPreferences = {
+        ...(user.notificationPreferences || { inApp: true, email: true, appointmentReminders: true }),
+        ...notificationPreferences
+      };
+    }
+
+    if (privacySettings) {
+      user.privacySettings = {
+        ...(user.privacySettings || { shareHealthSummaryOnBooking: false, allowEmergencyLookup: true, consentLogsEnabled: true }),
+        ...privacySettings
+      };
+    }
 
     await user.save();
+
+    // Sync patient personal/health info with linked HealthId record if patient
+    if (user.role === 'PATIENT') {
+      const healthIdRecord = await MongoDb.healthIds.findOne({ userId: String(user._id || user.id) });
+      if (healthIdRecord) {
+        if (name) healthIdRecord.fullName = name;
+        if (phone !== undefined) healthIdRecord.phoneNumber = phone;
+        if (dob) healthIdRecord.dateOfBirth = dob;
+        if (gender && ['Male', 'Female', 'Other', 'Unspecified'].includes(gender)) {
+          healthIdRecord.gender = gender;
+        }
+        if (address !== undefined) healthIdRecord.address = address;
+        if (bloodGroup) healthIdRecord.bloodGroup = bloodGroup;
+        if (emergencyContact && typeof emergencyContact === 'object') {
+          healthIdRecord.emergencyContact = {
+            ...(healthIdRecord.emergencyContact || {}),
+            ...emergencyContact
+          };
+        }
+        if (allergies !== undefined || conditions !== undefined) {
+          healthIdRecord.healthProfile = {
+            ...(healthIdRecord.healthProfile || {}),
+            ...(allergies !== undefined ? { allergies: String(allergies).split(',').map((s) => s.trim()).filter(Boolean) } : {}),
+            ...(conditions !== undefined ? { chronicConditions: String(conditions).split(',').map((s) => s.trim()).filter(Boolean) } : {})
+          };
+        }
+        if (typeof healthIdRecord.save === 'function') {
+          await healthIdRecord.save().catch(() => {});
+        }
+      }
+    }
+
+    await recordAuditLog({
+      actorId: user._id || user.id,
+      actorRole: user.role,
+      action: 'PROFILE_UPDATED',
+      targetType: 'User',
+      targetId: user._id || user.id,
+      details: { updatedFields: Object.keys(validationResult.data) },
+      req
+    });
 
     return res.json({
       success: true,
@@ -785,6 +1006,93 @@ const updateProfile = async (req, res) => {
   } catch (error) {
     console.error('[Update Profile Error]:', error);
     return res.status(500).json({ success: false, error: error.message || 'Server error updating profile' });
+  }
+};
+
+// @desc    Change authenticated user's password
+// @route   PUT /api/auth/change-password
+// @access  Private
+const changePassword = async (req, res) => {
+  try {
+    const validationResult = changePasswordSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      const issues = validationResult.error.issues || [];
+      const firstError = issues[0]?.message || 'Invalid password payload';
+      return res.status(400).json({
+        success: false,
+        error: firstError,
+        message: firstError,
+        details: issues
+      });
+    }
+
+    const { currentPassword, newPassword } = validationResult.data;
+    const userId = req.user._id || req.user.id;
+    const user = await MongoDb.users.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const isMatch = await user.matchPassword(currentPassword);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        error: 'Current password is incorrect'
+      });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'New password must be different from your current password'
+      });
+    }
+
+    const salt = await bcrypt.genSalt(12);
+    user.password = await bcrypt.hash(newPassword, salt);
+    await user.save();
+
+    await recordAuditLog({
+      actorId: userId,
+      actorRole: user.role,
+      action: 'PASSWORD_CHANGED',
+      targetType: 'User',
+      targetId: userId,
+      req
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password updated successfully'
+    });
+  } catch (error) {
+    console.error('[Change Password Error]:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to update password'
+    });
+  }
+};
+
+// @desc    Get audit logs for current user
+// @route   GET /api/auth/audit-logs
+// @access  Private
+const getMyAuditLogs = async (req, res) => {
+  try {
+    const userId = String(req.user._id || req.user.id);
+    const logs = await MongoDb.auditLogs.find({
+      $or: [{ actorId: userId }, { targetId: userId }]
+    });
+    return res.status(200).json({
+      success: true,
+      count: logs.length,
+      logs
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve audit logs'
+    });
   }
 };
 
@@ -908,6 +1216,8 @@ module.exports = {
   logoutUser,
   getMe,
   updateProfile,
+  changePassword,
+  getMyAuditLogs,
   sendOTP,
   verifyOTP,
   submitRoleVerification,

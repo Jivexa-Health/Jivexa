@@ -1,13 +1,15 @@
 /**
  * JIVEXA Health AI - Medical Safety & Emergency Screening Engine
- * 
+ *
  * Enforces healthcare safety guardrails:
- * - Immediate emergency triage & escalation (108/112/Tele-MANAS)
+ * - Immediate emergency triage & escalation (112 / 108 / Tele-MANAS) without delaying questions
  * - Strict prohibition of definitive medical diagnosis
  * - Strict prohibition of unauthorized prescription drug dosing / regimen alteration
  * - Communication of clinical uncertainty and missing information
- * - Emergency first-aid guidance without replacing in-person clinical care
+ * - Maximum 1 follow-up question per response, only when necessary
  */
+
+const { detectLanguageMode } = require('../healthGuardrail');
 
 const URGENCY_LEVELS = {
   EMERGENCY: 'emergency',
@@ -17,7 +19,7 @@ const URGENCY_LEVELS = {
   INFORMATIONAL: 'informational'
 };
 
-// Emergency hotlines (India-centric with global fallback)
+// Emergency hotlines (India-centric)
 const EMERGENCY_CONTACTS = {
   nationalEmergency: '112',
   ambulance: '108',
@@ -26,47 +28,47 @@ const EMERGENCY_CONTACTS = {
   poisonControl: '1800-116-117 (National Poisons Information Centre, AIIMS)'
 };
 
-// Emergency clinical triggers
+// Emergency clinical triggers (English + Hindi/Hinglish)
 const EMERGENCY_SYMPTOM_TRIGGERS = [
   {
-    regex: /\b(chest pain|pressure in chest|crushing chest|radiating to left arm|radiating to jaw|heart attack|angina)\b/i,
-    condition: 'Potential Acute Coronary Syndrome / Myocardial Infarction',
-    guidance: 'Call 108/112 immediately. Chew an aspirin (if not allergic and advised by emergency services). Rest in a semi-upright position. Do NOT drive yourself to the hospital.'
+    regex: /\b(chest pain|pressure in chest|crushing chest|radiating to left arm|radiating to jaw|heart attack|angina|seene mein dard|seene me dard|chhati mein dard|chhati me dard|dil ka daura)\b/i,
+    condition: 'Possible Heart or Chest Emergency',
+    guidance: 'Call **112** or **108** immediately. Rest in a comfortable semi-upright position and do not drive yourself to the hospital.'
   },
   {
-    regex: /\b(severe difficulty breathing|cannot breathe|suffocating|choking|gasping for air|turning blue|cyanosis)\b/i,
-    condition: 'Acute Respiratory Distress / Severe Airway Obstruction',
-    guidance: 'Call 108/112 immediately. Sit upright, loosen tight clothing around neck/chest. Do not lie flat.'
+    regex: /\b(severe difficulty breathing|difficulty breathing|shortness of breath|cannot breathe|cant breathe|suffocating|choking|gasping for air|turning blue|cyanosis|saans lene mein dikkat|saans lene me dikkat|saans phoolna|saans nahi aa rahi|dum ghut)\b/i,
+    condition: 'Severe Breathing Difficulty',
+    guidance: 'Call **112** or **108** immediately. Sit upright, loosen tight clothing around your neck and chest, and stay calm while help arrives.'
   },
   {
-    regex: /\b(stroke|face drooping|facial droop|slurred speech|speech difficulty|arm weakness|hemiparesis|sudden loss of vision|sudden numbness on one side)\b/i,
-    condition: 'Suspected Acute Stroke (FAST)',
-    guidance: 'Call 108/112 immediately. Note the exact time symptoms started. Stroke is time-critical; thrombolytic therapy must begin within the golden window (typically 3-4.5 hours).'
+    regex: /\b(stroke|face drooping|facial droop|slurred speech|speech difficulty|arm weakness|hemiparesis|sudden loss of vision|sudden numbness on one side|lakwa|chehra tedha)\b/i,
+    condition: 'Possible Stroke Warning Signs',
+    guidance: 'Call **112** or **108** immediately. Note the exact time symptoms started—rapid hospital care is critical.'
   },
   {
-    regex: /\b(severe bleeding|uncontrolled bleeding|hemorrhage|vomiting blood|hematemesis|coughing blood|hemoptysis)\b/i,
-    condition: 'Severe Hemorrhage / Active Internal or External Bleeding',
-    guidance: 'Apply firm, continuous direct pressure with a clean cloth. Elevate injured limb if possible. Seek emergency transport immediately.'
+    regex: /\b(severe bleeding|uncontrolled bleeding|hemorrhage|vomiting blood|hematemesis|coughing blood|hemoptysis|zyada khoon|khoon ki ulti)\b/i,
+    condition: 'Severe Bleeding Emergency',
+    guidance: 'Call **112** or **108** immediately. Apply firm, steady pressure with a clean cloth to external bleeding and go to the nearest emergency room.'
   },
   {
     regex: /\b(anaphylaxis|throat swelling|swollen tongue|swollen lips|hives.*difficulty breathing|allergic reaction.*breathing)\b/i,
-    condition: 'Severe Anaphylactic Reaction',
-    guidance: 'Administer Epinephrine auto-injector (EpiPen) immediately into the outer thigh if prescribed. Call 108/112 without delay. Lie flat with legs elevated unless breathing is difficult.'
+    condition: 'Severe Allergic Reaction',
+    guidance: 'Call **112** or **108** immediately. Use a prescribed epinephrine auto-injector if available and seek emergency care without delay.'
   },
   {
-    regex: /\b(unconscious|passed out|fainted.*not waking up|blackout.*not breathing|seizure.*lasting more than 5 minutes|status epilepticus)\b/i,
-    condition: 'Altered Mental Status / Prolonged Seizure',
-    guidance: 'Call 108/112 immediately. Place in the recovery position on their side. Do not put anything in their mouth. Clear surrounding hazards.'
+    regex: /\b(unconscious|loss of consciousness|passed out|fainted.*not waking up|blackout.*not breathing|seizure|status epilepticus|behosh|mirgi ka daura)\b/i,
+    condition: 'Unconsciousness or Seizure',
+    guidance: 'Call **112** or **108** immediately. Place the person safely on their side, clear nearby hazards, and do not put anything in their mouth.'
   },
   {
-    regex: /\b(suicide|kill myself|end my life|want to die|suicidal thoughts|hanging myself|swallow pills.*kill)\b/i,
-    condition: 'Acute Psychiatric Emergency / Self-Harm Crisis',
-    guidance: 'Please reach out immediately. You are not alone. Call Tele-MANAS (14416) or Vandrevala Foundation (9152987821) free 24/7. Please go to the nearest emergency room or stay with a trusted person.'
+    regex: /\b(suicide|kill myself|end my life|want to die|suicidal|self harm|self-harm|hanging myself)\b/i,
+    condition: 'Mental Health Crisis',
+    guidance: 'Please reach out right now—you are not alone. Call **112** or **Tele-MANAS (14416)** / **Vandrevala Foundation (9152987821)** free 24/7, or stay with a trusted person and visit the nearest emergency room.'
   },
   {
-    regex: /\b(swallowed poison|pesticide|rat poison|snake bite|toxic substance|chemical ingestion)\b/i,
-    condition: 'Acute Poisoning / Envenomation',
-    guidance: 'Call 108/112 immediately. For snakebite: keep the bitten limb immobilized below heart level; do NOT cut, suction, or apply a tight tourniquet. Keep the container/picture of the substance if safe to do so.'
+    regex: /\b(swallowed poison|poisoning|pesticide|rat poison|snake bite|saamp ne kata|toxic substance|chemical ingestion|overdose|zeher)\b/i,
+    condition: 'Poisoning, Overdose, or Bite Emergency',
+    guidance: 'Call **112** or **108** immediately (National Poison Helpline: 1800-116-117). Keep the bitten limb still if it is a snakebite—do not cut or tie a tight band.'
   }
 ];
 
@@ -82,16 +84,11 @@ const HIGH_PRIORITY_TRIGGERS = [
 ];
 
 /**
- * Screens user input and clinical context for red flags and determines urgency level.
- * 
- * @param {string} text - User message or query
- * @param {Object} context - Optional patient context
- * @returns {Object} Triage result
+ * Screens user input for red flags and determines urgency level.
  */
 const screenEmergency = (text = '', context = {}) => {
   const query = String(text || '');
 
-  // 1. Check emergency triggers
   for (const trigger of EMERGENCY_SYMPTOM_TRIGGERS) {
     if (trigger.regex.test(query)) {
       return {
@@ -105,14 +102,13 @@ const screenEmergency = (text = '', context = {}) => {
     }
   }
 
-  // 2. Check high-priority triggers
   for (const pattern of HIGH_PRIORITY_TRIGGERS) {
     if (pattern.test(query)) {
       return {
         isEmergency: false,
         urgencyLevel: URGENCY_LEVELS.HIGH_PRIORITY,
         identifiedCondition: 'Urgent Medical Attention Recommended',
-        guidance: 'Consult a qualified physician or visit an urgent care / casualty department within 12-24 hours.',
+        guidance: 'Please see a doctor or visit an urgent care clinic within 12-24 hours.',
         emergencyContacts: EMERGENCY_CONTACTS,
         requiresImmediateAction: false
       };
@@ -129,91 +125,91 @@ const screenEmergency = (text = '', context = {}) => {
   };
 };
 
-/**
- * Standard medical disclaimer template to ensure clinical and legal compliance.
- */
-const STANDARD_MEDICAL_DISCLAIMER = 
-  "JIVEXA Health AI is an educational clinical assistant and does not provide formal medical diagnosis, individualized treatment plans, or emergency care. In medical emergencies, contact 108 or 112 immediately. Always consult a licensed healthcare practitioner before starting, stopping, or altering any medication or treatment regimen.";
+const STANDARD_MEDICAL_DISCLAIMER =
+  'This is educational health information and does not replace a licensed doctor. Call 112 for medical emergencies.';
 
 /**
- * Generates an emergency structured response payload when critical red flags are detected.
- * 
- * @param {Object} triageResult - Result from screenEmergency
- * @param {string} userQuery - Original query
- * @returns {Object} Complete structured emergency response
+ * Generates an immediate, clear emergency response WITHOUT delaying with follow-up questions.
  */
-const buildEmergencyStructuredResponse = (triageResult, userQuery) => {
+const buildEmergencyStructuredResponse = (triageResult, userQuery = '') => {
+  const lang = detectLanguageMode(userQuery);
+  const isHindiLike = lang === 'hindi' || lang === 'hinglish';
+
+  if (isHindiLike) {
+    return {
+      intent: 'EMERGENCY_TRIAGE',
+      response_mode: 'emergency',
+      urgency_level: URGENCY_LEVELS.EMERGENCY,
+      answer_summary: `URGENT: Aapke bataye lakshan (${triageResult.identifiedCondition || 'emergency sthiti'}) ke liye turant medical madad zaroori hai. Kripya abhi **112** ya **108** par call karein.`,
+      key_information: [
+        'Turant **112** (Emergency) ya **108** (Ambulance) par call karein.',
+        'Nazdeeki hospital ke Emergency department mein turant jayein.',
+        'Khud gaadi drive na karein aur kisi saathi ko paas rakhein.'
+      ],
+      precautions: [
+        'Ilaj mein deri na karein aur gharelu upchar ke bharose na rahein.',
+        'Bina doctor ki salah ke koi dawa na lein.'
+      ],
+      warning_signs: [
+        'Behoshi, chakkar aana, ya bolne mein dikkat',
+        'Saans lene mein zyada takleef ya tezi se badhta dard'
+      ],
+      recommended_next_steps: [
+        'Abhi **112** ya **108** par call karein.',
+        'Mental health crisis ho toh Tele-MANAS **14416** par 24/7 free helpline par baat karein.'
+      ],
+      follow_up_questions: [], // Never delay emergency guidance with questions
+      medical_sources: [],
+      disclaimer: 'Yeh emergency alert turant sahayta ke liye hai—doctor ya hospital care ka vikalp nahi hai.'
+    };
+  }
+
   return {
     intent: 'EMERGENCY_TRIAGE',
+    response_mode: 'emergency',
     urgency_level: URGENCY_LEVELS.EMERGENCY,
-    answer_summary: `CRITICAL ALERT: Your described symptoms (${triageResult.identifiedCondition || 'acute symptoms'}) require IMMEDIATE emergency medical evaluation. Please contact emergency services right now.`,
+    answer_summary: `URGENT: Your symptoms (${triageResult.identifiedCondition || 'medical emergency'}) need immediate emergency medical care. Please call **112** or **108** right away.`,
     key_information: [
-      `Potential Acute Condition: ${triageResult.identifiedCondition || 'Medical Emergency'}`,
-      `Emergency Services: Call Ambulance at 108 or Central Emergency at 112 immediately.`,
-      `First Action: ${triageResult.guidance || 'Seek immediate medical attention at the nearest emergency department.'}`,
-      `Do not attempt to drive yourself to the hospital; have an ambulance or someone else transport you.`
+      triageResult.guidance || 'Call 112 (Emergency) or 108 (Ambulance) immediately and go to the nearest emergency room.',
+      'Do not drive yourself—ask someone nearby to help or wait for an ambulance.'
     ],
     precautions: [
-      "Do NOT delay seeking immediate in-person emergency care.",
-      "Do NOT take home remedies, pain medications, or unprescribed drugs until evaluated by an emergency team.",
-      "Keep someone near you and unlock your primary entrance so emergency personnel can access you."
+      'Do not wait to see if symptoms improve on their own.',
+      'Avoid taking unprescribed medicines before an emergency team evaluates you.'
     ],
     warning_signs: [
-      "Loss of consciousness, fainting, or severe lightheadedness",
-      "Worsening difficulty breathing or inability to speak in full sentences",
-      "Bluish tint on lips, face, or fingernails (cyanosis)",
-      "Sudden weakness, numbness, or inability to move parts of the body",
-      "Rapidly spreading severe pain or heavy bleeding"
+      'Fainting, confusion, or trouble speaking',
+      'Worsening shortness of breath, heavy bleeding, or spreading pain'
     ],
     recommended_next_steps: [
-      "Dial 108 (Ambulance) or 112 (National Emergency) right away.",
-      "If mental health crisis: Call Tele-MANAS at 14416 or Vandrevala Foundation at 9152987821.",
-      "Stay calm, sit or lie in a safe position, and await medical first responders.",
-      "Keep your emergency Health ID / medication list accessible for paramedics."
+      'Call **112** (National Emergency) or **108** (Ambulance) right now.',
+      'For mental health crises, call Tele-MANAS at **14416** or Vandrevala Foundation at **9152987821** (24/7).'
     ],
-    follow_up_questions: [
-      "Are you currently with someone who can assist you?",
-      "Have you called 108 or 112 yet?",
-      "Do you have any known medical conditions or medications you take regularly?"
-    ],
-    medical_sources: [
-      {
-        organization: "World Health Organization (WHO)",
-        title: "Emergency Medical Triage and Resuscitation Guidelines",
-        url: "https://www.who.int/emergencies",
-        verified: true
-      },
-      {
-        organization: "Indian Council of Medical Research (ICMR)",
-        title: "Standard Treatment Guidelines for Emergency Care",
-        url: "https://www.icmr.gov.in",
-        verified: true
-      }
-    ],
+    follow_up_questions: [], // Never delay emergency guidance with questions
+    medical_sources: [],
     disclaimer: STANDARD_MEDICAL_DISCLAIMER
   };
 };
 
 /**
- * Helper to scrub non-compliant diagnoses and unauthorized dosages from any clinical text field.
+ * Scrubs definitive diagnoses, unauthorized dosages, and repetitive disclaimers from text.
  */
 const sanitizeClinicalText = (text) => {
   if (typeof text !== 'string') return text;
   return text
-    .replace(/\b(you have|you are suffering from|my diagnosis is)\b/gi, 'your symptoms may indicate')
-    .replace(/\b(i diagnose you with|you definitely have)\b/gi, 'possibility of')
-    .replace(/\b(stop taking your|discontinue your)\s+([a-z]+)\b/gi, 'do not alter your $2 regimen without consulting your prescribing doctor')
-    .replace(/\b(take|consume|use)\s+\d+(?:\.\d+)?\s*(?:mg|ml|tablets?|capsules?|pills?|doses?)\s*(?:daily|twice|thrice|per day|every \d+ hours?)?/gi, 'consult your doctor for precise dosage specifications');
+    .replace(/\b(you definitely have|i diagnose you with|my diagnosis is)\b/gi, 'this may be related to')
+    .replace(/\b(you have|you are suffering from)\b/gi, 'these signs can sometimes point to')
+    .replace(/\b(stop taking your|discontinue your)\s+([a-z]+)\b/gi, 'do not change or stop your $2 without speaking to your doctor')
+    .replace(/\b(take|consume|use)\s+\d+(?:\.\d+)?\s*(?:mg|ml|tablets?|capsules?|pills?|doses?)\s*(?:daily|twice|thrice|per day|every \d+ hours?)?/gi, 'check the exact dose with your doctor or pharmacist')
+    .replace(/\*?Note:\s*This is educational healthcare information\.[^*\n]*\*?/gi, '')
+    .trim();
 };
 
 /**
- * Audits and sanitizes AI response text to ensure strict safety guardrail compliance:
- * - Eliminates definitive diagnosis statements ("You have X" -> "Symptoms may suggest X, which requires doctor confirmation")
- * - Removes unauthorized dosage recommendations
- * - Eliminates instructions to stop or change prescribed medications
- * 
- * @param {Object} structuredData - Parsed AI output
- * @returns {Object} Cleaned, safety-compliant structured data
+ * Audits and sanitizes structured AI output:
+ * - Prevents definitive diagnoses and unauthorized medication dosing
+ * - Enforces maximum 1 follow-up question
+ * - Preserves natural, concise responses without forcing bloated empty sections
  */
 const auditResponseSafety = (structuredData) => {
   if (!structuredData || typeof structuredData !== 'object') {
@@ -222,48 +218,56 @@ const auditResponseSafety = (structuredData) => {
 
   const sanitized = { ...structuredData };
 
-  // Ensure mandatory fields exist
-  if (!sanitized.disclaimer) {
-    sanitized.disclaimer = STANDARD_MEDICAL_DISCLAIMER;
-  }
-
-  // Safety filter for summary
   if (typeof sanitized.answer_summary === 'string') {
     sanitized.answer_summary = sanitizeClinicalText(sanitized.answer_summary);
   }
 
-  // Ensure key_information is an array of sanitized strings
   if (Array.isArray(sanitized.key_information)) {
-    sanitized.key_information = sanitized.key_information.map(item => sanitizeClinicalText(String(item)));
-  }
-
-  // Ensure precautions is an array
-  if (!Array.isArray(sanitized.precautions) || sanitized.precautions.length === 0) {
-    sanitized.precautions = [
-      "Do not begin or modify medications without professional clinical evaluation.",
-      "Monitor your symptoms closely and report any worsening to your physician."
-    ];
+    sanitized.key_information = sanitized.key_information
+      .map(item => sanitizeClinicalText(String(item)))
+      .filter(Boolean);
   } else {
-    sanitized.precautions = sanitized.precautions.map(item => sanitizeClinicalText(String(item)));
+    sanitized.key_information = [];
   }
 
-  // Ensure warning_signs is an array
-  if (!Array.isArray(sanitized.warning_signs) || sanitized.warning_signs.length === 0) {
-    sanitized.warning_signs = [
-      "Sudden worsening of symptoms",
-      "High persistent fever or difficulty breathing",
-      "Severe or unmanageable pain"
-    ];
-  }
-
-  // Ensure recommended_next_steps is an array
-  if (!Array.isArray(sanitized.recommended_next_steps) || sanitized.recommended_next_steps.length === 0) {
-    sanitized.recommended_next_steps = [
-      "Consult a licensed medical doctor for clinical examination and definitive care.",
-      "Maintain hydration, rest, and track the progression of your symptoms."
-    ];
+  if (Array.isArray(sanitized.precautions)) {
+    sanitized.precautions = sanitized.precautions
+      .map(item => sanitizeClinicalText(String(item)))
+      .filter(Boolean);
   } else {
-    sanitized.recommended_next_steps = sanitized.recommended_next_steps.map(item => sanitizeClinicalText(String(item)));
+    sanitized.precautions = [];
+  }
+
+  if (Array.isArray(sanitized.warning_signs)) {
+    sanitized.warning_signs = sanitized.warning_signs
+      .map(item => sanitizeClinicalText(String(item)))
+      .filter(Boolean);
+  } else {
+    sanitized.warning_signs = [];
+  }
+
+  if (Array.isArray(sanitized.recommended_next_steps)) {
+    sanitized.recommended_next_steps = sanitized.recommended_next_steps
+      .map(item => sanitizeClinicalText(String(item)))
+      .filter(Boolean);
+  } else {
+    sanitized.recommended_next_steps = [];
+  }
+
+  // Strictly enforce max 1 follow-up question per response (0 for emergency or conversational)
+  if (sanitized.urgency_level === 'emergency' || sanitized.response_mode === 'conversational') {
+    sanitized.follow_up_questions = [];
+  } else if (Array.isArray(sanitized.follow_up_questions)) {
+    sanitized.follow_up_questions = sanitized.follow_up_questions
+      .map(q => String(q || '').trim())
+      .filter(Boolean)
+      .slice(0, 1);
+  } else {
+    sanitized.follow_up_questions = [];
+  }
+
+  if (!sanitized.disclaimer && sanitized.response_mode !== 'conversational') {
+    sanitized.disclaimer = STANDARD_MEDICAL_DISCLAIMER;
   }
 
   return sanitized;
@@ -275,5 +279,6 @@ module.exports = {
   screenEmergency,
   buildEmergencyStructuredResponse,
   auditResponseSafety,
+  sanitizeClinicalText,
   STANDARD_MEDICAL_DISCLAIMER
 };

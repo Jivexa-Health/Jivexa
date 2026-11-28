@@ -16,6 +16,11 @@ const appointmentSchema = new mongoose.Schema(
       required: [true, 'Patient name is required'],
       trim: true
     },
+    patientPhone: {
+      type: String,
+      default: '',
+      trim: true
+    },
     doctorId: {
       type: String,
       required: [true, 'Doctor ID is required'],
@@ -31,6 +36,20 @@ const appointmentSchema = new mongoose.Schema(
       default: 'General Medicine',
       trim: true
     },
+    clinicName: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    clinicAddress: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    consultationFee: {
+      type: Number,
+      default: 0
+    },
     date: {
       type: String,
       required: [true, 'Appointment date is required'],
@@ -38,29 +57,68 @@ const appointmentSchema = new mongoose.Schema(
     },
     time: {
       type: String,
-      required: [true, 'Appointment time is required']
+      required: [true, 'Appointment time is required'],
+      trim: true
     },
     consultationType: {
       type: String,
-      default: 'Video'
+      enum: ['In-Person', 'Video'],
+      default: 'In-Person'
     },
     status: {
       type: String,
-      default: 'Upcoming'
+      enum: ['Pending', 'Confirmed', 'Rejected', 'Cancelled', 'Completed', 'Upcoming', 'In Consultation'],
+      default: 'Pending',
+      index: true
+    },
+    activeSlot: {
+      type: Boolean,
+      default: true
+    },
+    reason: {
+      type: String,
+      default: '',
+      trim: true
     },
     notes: {
       type: String,
-      default: ''
+      default: '',
+      trim: true
     },
     consultationSummary: {
       type: String,
       default: ''
+    },
+    rejectionReason: {
+      type: String,
+      default: ''
+    },
+    cancellationReason: {
+      type: String,
+      default: ''
+    },
+    cancelledBy: {
+      type: String,
+      default: ''
+    },
+    sharedReportIds: {
+      type: [String],
+      default: []
     }
   },
   {
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
+  }
+);
+
+// Atomic database-level double-booking guard for active slots across all application instances
+appointmentSchema.index(
+  { doctorId: 1, date: 1, time: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { activeSlot: true }
   }
 );
 
@@ -71,4 +129,3 @@ appointmentSchema.virtual('id').get(function () {
 const Appointment = mongoose.model('Appointment', appointmentSchema);
 
 module.exports = Appointment;
-

@@ -1,552 +1,884 @@
-import React, { useState } from 'react';
-import { useAuth } from '../../context/AuthContext';
-import { useHealthData, Doctor } from '../../context/HealthDataContext';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  fetchNearbyDoctorsApi,
+  VerifiedDoctor
+} from '../../services/doctorService';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { Modal } from '../../components/ui/Modal';
-import { Toast } from '../../components/ui/Toast';
-import { 
-  Search, Star, MapPin, Calendar, Clock, Video, User, 
-  CheckCircle2, ShieldCheck, Stethoscope, Award, Phone, 
-  Building2, Sparkles, Filter, Check
+import {
+  Search, MapPin, Clock, Building2, CheckCircle2,
+  Stethoscope, RefreshCw, AlertCircle, Calendar, Navigation,
+  Compass, Crosshair, ChevronRight
 } from 'lucide-react';
 
-export const DoctorDiscovery: React.FC = () => {
-  const { doctors, bookAppointment } = useHealthData();
-  const [search, setSearch] = useState('');
-  const [specialty, setSpecialty] = useState('All');
-  const [consultType, setConsultType] = useState('All');
+interface LocationState {
+  lat?: number;
+  lng?: number;
+  label: string;
+  isGps: boolean;
+  city?: string;
+  pincode?: string;
+}
 
-  // Booking Modal State
-  const [selectedDoc, setSelectedDoc] = useState<Doctor | null>(null);
-  const [isBookingOpen, setIsBookingOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>('10:30 AM');
-  const [consultMode, setConsultMode] = useState<'Video' | 'In-Person'>('Video');
-  const [symptomsNotes, setSymptomsNotes] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [toastMsg, setToastMsg] = useState('');
+const POPULAR_HUBS: { name: string; lat: number; lng: number; city: string }[] = [
+  { name: 'Delhi NCR', lat: 28.6139, lng: 77.2090, city: 'Delhi' },
+  { name: 'Bengaluru, KA', lat: 12.9716, lng: 77.5946, city: 'Bengaluru' },
+  { name: 'Mumbai, MH', lat: 19.0760, lng: 72.8777, city: 'Mumbai' },
+  { name: 'Hyderabad, TS', lat: 17.3850, lng: 78.4867, city: 'Hyderabad' },
+  { name: 'Chennai, TN', lat: 13.0827, lng: 80.2707, city: 'Chennai' },
+  { name: 'Pune, MH', lat: 18.5204, lng: 73.8567, city: 'Pune' },
+  { name: 'Kolkata, WB', lat: 22.5726, lng: 88.3639, city: 'Kolkata' },
+  { name: 'Gurugram, HR', lat: 28.4595, lng: 77.0266, city: 'Gurugram' }
+];
+
+const DEFAULT_SPECIALTIES = [
+  'General Physician',
+  'Cardiologist',
+  'Cardiology',
+  'Dermatologist',
+  'Pediatrician',
+  'Pediatrics',
+  'Orthopedic Surgeon',
+  'Neurologist',
+  'Neurology',
+  'Gynecologist',
+  'Endocrinologist'
+];
+
+export const DoctorDiscovery: React.FC = () => {
+  const navigate = useNavigate();
+
+  const [doctors, setDoctors] = useState<VerifiedDoctor[]>([]);
+  const [knownSpecialties, setKnownSpecialties] = useState<string[]>(DEFAULT_SPECIALTIES);
+  const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Default Practo Doctors Data with Avatars & Credentials
-  const defaultPractoDoctors: Doctor[] = [
-    {
-      id: '00000000-0000-0000-0000-000000000001',
-      name: 'Dr. Anand Sen',
-      specialty: 'Cardiologist',
-      experience: 15,
-      location: 'Indiranagar, Bengaluru',
-      availability: 'Mon, Wed, Fri (10:00 AM - 4:00 PM)',
-      consultationType: 'Both',
-      rating: 4.9,
-      education: 'MBBS, MD (Cardiology) - AIIMS Delhi',
-      about: 'Senior cardiologist with over 15 years of experience treating coronary artery disease, arrhythmias, and hypertension. Dedicated to preventive cardiac care.',
-      fee: 800,
-      photoUrl: 'https://images.unsplash.com/photo-1537368910025-700350fe46c7?w=200&auto=format&fit=crop&q=80',
-      clinicName: 'Sen Cardiac Care Institute',
-      registrationNumber: 'MCI-119283-X',
-      status: 'approved'
-    },
-    {
-      id: '00000000-0000-0000-0000-000000000002',
-      name: 'Dr. Priya Sharma',
-      specialty: 'Pediatrician',
-      experience: 12,
-      location: 'Koramangala, Bengaluru',
-      availability: 'Tue, Thu, Sat (9:00 AM - 1:00 PM)',
-      consultationType: 'Both',
-      rating: 4.8,
-      education: 'MBBS, DCH - Bangalore Medical College',
-      about: 'Passionate pediatrician specializing in childhood growth development, immunizations, and general pediatric illnesses.',
-      fee: 600,
-      photoUrl: 'https://images.unsplash.com/photo-1594824813566-88855ce64ce4?w=200&auto=format&fit=crop&q=80',
-      clinicName: 'Kiddies Health Clinic',
-      registrationNumber: 'KMC-773910-B',
-      status: 'approved'
-    },
-    {
-      id: '00000000-0000-0000-0000-000000000003',
-      name: 'Dr. Rajesh Patel',
-      specialty: 'Dermatologist',
-      experience: 10,
-      location: 'Jayanagar, Bengaluru',
-      availability: 'Mon - Fri (5:00 PM - 8:00 PM)',
-      consultationType: 'Video',
-      rating: 4.7,
-      education: 'MBBS, MD (Dermatology) - JIPMER',
-      about: 'Focuses on skin cancer screening, acne management, eczema treatment, and clinical hair fall therapies.',
-      fee: 700,
-      photoUrl: 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=200&auto=format&fit=crop&q=80',
-      clinicName: 'DermaCare Skin & Laser Clinic',
-      registrationNumber: 'MCI-994812-D',
-      status: 'approved'
-    },
-    {
-      id: '00000000-0000-0000-0000-000000000004',
-      name: 'Dr. Meera Nair',
-      specialty: 'General Physician',
-      experience: 14,
-      location: 'Whitefield, Bengaluru',
-      availability: 'Mon - Sat (9:00 AM - 5:00 PM)',
-      consultationType: 'Both',
-      rating: 4.6,
-      education: 'MBBS, DNB (Internal Medicine) - Manipal Hospital',
-      about: 'Handles primary healthcare concerns, metabolic management, infectious diseases, and routine health assessments.',
-      fee: 500,
-      photoUrl: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=200&auto=format&fit=crop&q=80',
-      clinicName: 'Whitefield Family Health Clinic',
-      registrationNumber: 'KMC-662810-G',
-      status: 'approved'
-    }
-  ];
-
-  const displayDoctors = doctors.length > 0 ? doctors : defaultPractoDoctors;
-
-  const filteredDoctors = displayDoctors.filter((doc) => {
-    const matchesSearch = doc.name.toLowerCase().includes(search.toLowerCase()) || 
-                          doc.specialty.toLowerCase().includes(search.toLowerCase()) ||
-                          doc.location.toLowerCase().includes(search.toLowerCase()) ||
-                          (doc.clinicName && doc.clinicName.toLowerCase().includes(search.toLowerCase()));
-    const matchesSpecialty = specialty === 'All' || doc.specialty === specialty;
-    const matchesType = consultType === 'All' || 
-                        doc.consultationType === consultType || 
-                        doc.consultationType === 'Both';
-    return matchesSearch && matchesSpecialty && matchesType;
+  // Location State
+  const [location, setLocation] = useState<LocationState>({
+    label: 'Detecting live GPS location...',
+    isGps: true
   });
+  const [gpsReady, setGpsReady] = useState(false);
+  const [isLocating, setIsLocating] = useState(true);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
+  const [manualQuery, setManualQuery] = useState('');
+  const [radiusKm, setRadiusKm] = useState<number>(25);
 
-  const specialties = ['All', 'Cardiologist', 'Pediatrician', 'Dermatologist', 'General Physician', 'Orthopedics', 'Neurology', 'Gynecologist'];
+  // Filters State
+  const [search, setSearch] = useState('');
+  const [specialization, setSpecialization] = useState('All');
+  const [consultationType, setConsultationType] = useState('All');
 
-  const handleOpenBooking = (doc: Doctor) => {
-    setSelectedDoc(doc);
-    setIsBookingOpen(true);
-    setSelectedDate(new Date().toISOString().split('T')[0]);
-    setSelectedTimeSlot('10:30 AM');
-    setConsultMode('Video');
-    setSymptomsNotes('');
-    setErrorMsg('');
-  };
-
-  const handleConfirmBooking = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedDoc) return;
-    if (!selectedDate || !selectedTimeSlot) {
-      setErrorMsg('Please select an appointment date and time slot.');
+  // Automatic GPS Location Detection
+  const detectLiveGPS = useCallback(() => {
+    if (!navigator.geolocation) {
+      setLocation({
+        label: 'Location unavailable — Select city or PIN code',
+        isGps: false
+      });
+      setGpsError('Browser geolocation is not supported. Use Change Location to search by city, locality, or PIN code.');
+      setIsLocating(false);
+      setGpsReady(true);
       return;
     }
 
-    setErrorMsg('');
-    setIsSubmitting(true);
+    setIsLocating(true);
+    setGpsError(null);
+    setLocation((prev) => ({
+      ...prev,
+      label: 'Detecting live GPS location...',
+      isGps: true
+    }));
 
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        let addr = `GPS: ${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E`;
+        let detectedCity = '';
+
+        try {
+          const res = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const locality = data.locality || '';
+            const city = data.city || data.principalSubdivision || '';
+            const state = data.principalSubdivision || '';
+            detectedCity = city || locality;
+
+            const parts = Array.from(new Set([locality, city, state].filter(Boolean)));
+            if (parts.length > 0) {
+              addr = parts.join(', ');
+            }
+          }
+        } catch {
+          // Keep GPS coordinate string fallback
+        }
+
+        setLocation({
+          lat,
+          lng,
+          label: addr,
+          isGps: true,
+          city: detectedCity
+        });
+        setGpsError(null);
+        setIsLocating(false);
+        setGpsReady(true);
+      },
+      (err) => {
+        console.warn('[Geolocation Error]:', err.message);
+        setLocation({
+          label: 'GPS permission denied or unavailable',
+          isGps: false
+        });
+        setGpsError('Location permission denied or GPS unavailable. Showing all verified doctors — use Change Location to search by city or PIN code.');
+        setIsLocating(false);
+        setGpsReady(true);
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+    );
+  }, []);
+
+  // Request location on initial mount
+  useEffect(() => {
+    detectLiveGPS();
+  }, [detectLiveGPS]);
+
+  // Load nearby or filtered approved doctors using GET /api/doctors/nearby
+  const loadDoctors = useCallback(async () => {
+    if (!gpsReady) return;
+    setIsLoading(true);
+    setErrorMsg('');
     try {
-      const res = await bookAppointment(
-        selectedDoc.name,
-        selectedDoc.specialty,
-        selectedDate,
-        selectedTimeSlot
+      const hasCoords = location.lat !== undefined && location.lng !== undefined;
+      const res = await fetchNearbyDoctorsApi(
+        hasCoords
+          ? {
+              latitude: location.lat,
+              longitude: location.lng,
+              radius: radiusKm,
+              specialization,
+              search
+            }
+          : {
+              specialization,
+              search,
+              city: location.city,
+              pincode: location.pincode
+            }
       );
 
-      setIsBookingOpen(false);
-      setToastMsg(`🎉 Consultation booked with ${selectedDoc.name} on ${selectedDate} at ${selectedTimeSlot}!`);
-    } catch (e) {
-      setErrorMsg('An unexpected error occurred during booking.');
+      if (res.success) {
+        const activeApproved = (res.doctors || []).filter(
+          (doc) => doc.isVerified && doc.verificationStatus === 'APPROVED'
+        );
+        setDoctors(activeApproved);
+        const fetchedSpecs = activeApproved.map((d) => d.specialization).filter(Boolean);
+        if (fetchedSpecs.length > 0) {
+          setKnownSpecialties((prev) => Array.from(new Set([...prev, ...fetchedSpecs])));
+        }
+      } else {
+        setErrorMsg(res.error || 'Unable to retrieve nearby doctors.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Unable to connect to healthcare server.');
     } finally {
-      setIsSubmitting(false);
+      setIsLoading(false);
+    }
+  }, [gpsReady, location, radiusKm, specialization, search]);
+
+  useEffect(() => {
+    loadDoctors();
+  }, [loadDoctors]);
+
+  const filteredDoctors = doctors.filter((doc) => {
+    const q = search.trim().toLowerCase();
+    const matchesSearch =
+      !q ||
+      doc.name.toLowerCase().includes(q) ||
+      doc.specialization.toLowerCase().includes(q) ||
+      doc.qualifications.toLowerCase().includes(q) ||
+      doc.clinicName.toLowerCase().includes(q) ||
+      doc.clinicAddress.toLowerCase().includes(q) ||
+      doc.city.toLowerCase().includes(q) ||
+      (doc.pincode && doc.pincode.toLowerCase().includes(q));
+
+    const matchesSpec =
+      specialization === 'All' ||
+      doc.specialization.toLowerCase() === specialization.toLowerCase();
+
+    const matchesType =
+      consultationType === 'All' ||
+      doc.consultationTypes.some((t) => t.toLowerCase() === consultationType.toLowerCase());
+
+    return matchesSearch && matchesSpec && matchesType;
+  });
+
+  // Handle manual city, locality or PIN code search
+  const handleManualLocationSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = manualQuery.trim();
+    if (!q) return;
+
+    const isPincode = /^\d{5,6}$/.test(q);
+
+    // Check if query matches a known hub
+    const matchedHub = !isPincode
+      ? POPULAR_HUBS.find(
+          (h) =>
+            h.name.toLowerCase().includes(q.toLowerCase()) ||
+            h.city.toLowerCase().includes(q.toLowerCase())
+        )
+      : undefined;
+
+    if (matchedHub) {
+      setLocation({
+        lat: matchedHub.lat,
+        lng: matchedHub.lng,
+        label: matchedHub.name,
+        isGps: false,
+        city: matchedHub.city
+      });
+    } else if (isPincode) {
+      setLocation({
+        label: `PIN Code: ${q}`,
+        isGps: false,
+        pincode: q
+      });
+    } else {
+      setLocation({
+        label: q,
+        isGps: false,
+        city: q
+      });
+    }
+
+    setGpsError(null);
+    setGpsReady(true);
+    setIsLocationModalOpen(false);
+  };
+
+  const handleSelectHub = (hub: (typeof POPULAR_HUBS)[0]) => {
+    setLocation({
+      lat: hub.lat,
+      lng: hub.lng,
+      label: hub.name,
+      isGps: false,
+      city: hub.city
+    });
+    setGpsError(null);
+    setGpsReady(true);
+    setIsLocationModalOpen(false);
+  };
+
+  const handleResetToGps = () => {
+    setManualQuery('');
+    setIsLocationModalOpen(false);
+    detectLiveGPS();
+  };
+
+  const handleExpandRadius = () => {
+    if (radiusKm < 25) {
+      setRadiusKm(25);
+    } else if (radiusKm < 50) {
+      setRadiusKm(50);
+    } else {
+      setRadiusKm(100);
     }
   };
 
-  const availableTimeSlots = [
-    '09:00 AM', '09:30 AM', '10:00 AM', '10:30 AM', 
-    '11:00 AM', '02:00 PM', '03:30 PM', '05:00 PM'
-  ];
-
-  // Quick next 4 dates
-  const nextDates = Array.from({ length: 4 }).map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    return {
-      fullDate: d.toISOString().split('T')[0],
-      label: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-    };
-  });
-
   return (
-    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '28px' }}>
-      
-      {/* PRACTO-STYLE BRAND GRADIENT HEADER BANNER */}
-      <div style={{
-        background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 50%, #10b981 100%)',
-        borderRadius: '24px',
-        padding: '32px 36px',
-        color: 'white',
-        boxShadow: '0 12px 30px -8px rgba(15, 118, 110, 0.4)',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: '20px'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <div style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '50%',
-            backgroundColor: 'rgba(255, 255, 255, 0.2)',
-            border: '2px solid rgba(255, 255, 255, 0.4)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'white',
-            backdropFilter: 'blur(10px)'
-          }}>
-            <Stethoscope size={32} />
+    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {/* HEADER BANNER */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 50%, #10b981 100%)',
+          borderRadius: '20px',
+          padding: '28px 32px',
+          color: 'white',
+          boxShadow: '0 10px 26px -8px rgba(15, 118, 110, 0.35)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '20px'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
+          <div
+            style={{
+              width: '58px',
+              height: '58px',
+              borderRadius: '16px',
+              backgroundColor: 'rgba(255, 255, 255, 0.2)',
+              border: '1px solid rgba(255, 255, 255, 0.35)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'white',
+              flexShrink: 0
+            }}
+          >
+            <Stethoscope size={28} />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'white' }}>Find & Book Verified Healthcare Practitioners</h1>
-              <span style={{ backgroundColor: 'rgba(255, 255, 255, 0.25)', fontSize: '0.72rem', fontWeight: 700, padding: '2px 10px', borderRadius: '12px', color: 'white' }}>100% Verified NMC License</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'white', margin: 0 }}>
+                Find My Doctor
+              </h1>
+              <span
+                style={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.22)',
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  padding: '3px 10px',
+                  borderRadius: '12px',
+                  color: 'white'
+                }}
+              >
+                GPS Location-Aware Discovery
+              </span>
             </div>
-            <p style={{ opacity: 0.9, fontSize: '0.88rem', marginTop: '4px' }}>
-              Connect with top-rated medical specialists for instant online video calls or clinic visits.
+            <p style={{ opacity: 0.92, fontSize: '0.88rem', marginTop: '4px', marginBottom: 0 }}>
+              Discover approved medical practitioners near your location, check distances, and book verified consultation slots.
             </p>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', padding: '10px 16px', borderRadius: '16px', backdropFilter: 'blur(8px)', textAlign: 'center' }}>
-            <span style={{ fontSize: '0.68rem', textTransform: 'uppercase', opacity: 0.8, fontWeight: 700 }}>Verified Doctors</span>
-            <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{displayDoctors.length} Active</div>
-          </div>
-          <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', padding: '10px 16px', borderRadius: '16px', backdropFilter: 'blur(8px)', textAlign: 'center' }}>
-            <span style={{ fontSize: '0.68rem', textTransform: 'uppercase', opacity: 0.8, fontWeight: 700 }}>Slot Lock</span>
-            <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>Instant</div>
-          </div>
-        </div>
+        <Button
+          variant="outline"
+          onClick={() => navigate('/patient/appointments')}
+          style={{
+            backgroundColor: 'white',
+            color: '#0f766e',
+            border: 'none',
+            borderRadius: '12px',
+            padding: '10px 18px',
+            fontWeight: 800,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <Calendar size={16} />
+          My Appointments
+        </Button>
       </div>
 
-      {/* SEARCH BAR & FILTER CARD */}
-      <Card style={{ borderRadius: '20px', padding: '18px 24px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '16px' }} className="grid-3-mobile">
-          <div style={{ position: 'relative' }}>
-            <Input 
-              placeholder="Search doctors by name, specialty, or clinic..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ height: '42px', fontSize: '0.88rem', paddingLeft: '36px', borderRadius: '12px' }}
-              icon={<Search size={16} style={{ color: 'var(--text-light)' }} />}
-            />
+      {/* LOCATION SELECTOR & GPS CONTROL BAR */}
+      <Card style={{ borderRadius: '18px', padding: '16px 20px', border: '1px solid #99f6e4', backgroundColor: 'var(--secondary-light)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+            <div
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '12px',
+                backgroundColor: gpsError ? '#fef3c7' : '#ccfbf1',
+                color: gpsError ? '#b45309' : '#0f766e',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}
+            >
+              {isLocating ? (
+                <RefreshCw size={18} className="animate-spin" />
+              ) : gpsError ? (
+                <AlertCircle size={18} />
+              ) : location.isGps ? (
+                <Navigation size={18} />
+              ) : (
+                <Compass size={18} />
+              )}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0f766e', letterSpacing: '0.04em' }}>
+                  {isLocating
+                    ? 'Locating via GPS...'
+                    : location.isGps
+                      ? 'Current GPS Location'
+                      : 'Selected Location'}
+                </span>
+                {location.isGps && !isLocating && !gpsError && (
+                  <span style={{ fontSize: '0.64rem', fontWeight: 800, backgroundColor: '#0f766e', color: 'white', padding: '1px 7px', borderRadius: '6px' }}>
+                    LIVE GPS
+                  </span>
+                )}
+              </div>
+              <p style={{ margin: '2px 0 0 0', fontSize: '0.94rem', fontWeight: 800, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {isLocating ? 'Requesting browser GPS coordinates...' : location.label}
+              </p>
+            </div>
           </div>
 
-          <Select 
-            options={specialties.map((s) => ({ value: s, label: s === 'All' ? 'All Specialties' : s }))}
-            value={specialty}
-            onChange={(val) => setSpecialty(val)}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            {/* Radius Filter Pills (When coordinates are present) */}
+            {location.lat !== undefined && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: 'var(--surface)', padding: '4px', borderRadius: '12px', border: '1px solid #99f6e4' }}>
+                <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#0f766e', padding: '0 6px' }}>Radius:</span>
+                {[10, 25, 50].map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    aria-pressed={radiusKm === r}
+                    onClick={() => setRadiusKm(r)}
+                    style={{
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '5px 11px',
+                      fontSize: '0.76rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      backgroundColor: radiusKm === r ? '#0f766e' : 'transparent',
+                      color: radiusKm === r ? 'white' : '#0f766e',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {r} km
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsLocationModalOpen(true)}
+              style={{
+                borderRadius: '10px',
+                height: '36px',
+                padding: '0 14px',
+                fontWeight: 700,
+                fontSize: '0.82rem',
+                backgroundColor: 'var(--surface)',
+                borderColor: '#99f6e4',
+                color: '#0f766e',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <MapPin size={14} />
+              Change Location
+            </Button>
+
+            {(!location.isGps || gpsError) && (
+              <Button
+                size="sm"
+                onClick={handleResetToGps}
+                isLoading={isLocating}
+                style={{
+                  borderRadius: '10px',
+                  height: '36px',
+                  padding: '0 14px',
+                  fontWeight: 700,
+                  fontSize: '0.82rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Crosshair size={14} />
+                Use Current GPS
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {gpsError && (
+          <div style={{ marginTop: '10px', fontSize: '0.8rem', color: '#92400e', backgroundColor: '#fef3c7', border: '1px solid #fde68a', padding: '8px 12px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertCircle size={15} style={{ flexShrink: 0 }} />
+              <span>{gpsError}</span>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* SEARCH & SPECIALIZATION FILTERS */}
+      <Card style={{ borderRadius: '18px', padding: '18px 22px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '14px' }} className="grid-3-mobile">
+          <Input
+            placeholder="Search by doctor name, clinic, city, or PIN code..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            icon={<Search size={16} style={{ color: 'var(--text-light)' }} />}
             style={{ height: '42px', borderRadius: '12px' }}
           />
-
-          <Select 
+          <Select
             options={[
-              { value: 'All', label: 'All Formats (Video & Clinic)' },
-              { value: 'Video', label: 'Video Call only' },
-              { value: 'In-Person', label: 'Clinic Visit only' }
+              { value: 'All', label: 'All Specializations' },
+              ...knownSpecialties.map((s) => ({ value: s, label: s }))
             ]}
-            value={consultType}
-            onChange={(val) => setConsultType(val)}
+            value={specialization}
+            onChange={(val) => setSpecialization(val)}
+            style={{ height: '42px', borderRadius: '12px' }}
+          />
+          <Select
+            options={[
+              { value: 'All', label: 'All Consultation Types' },
+              { value: 'In-Person', label: 'In-Person Clinic Visit' },
+              { value: 'Video', label: 'Video Consultation' }
+            ]}
+            value={consultationType}
+            onChange={(val) => setConsultationType(val)}
             style={{ height: '42px', borderRadius: '12px' }}
           />
         </div>
       </Card>
 
-      {/* DOCTORS CARDS LIST */}
-      {filteredDoctors.length === 0 ? (
-        <Card style={{ padding: '64px 24px', textAlign: 'center', backgroundColor: 'white', borderRadius: '24px' }}>
-          <User size={48} style={{ color: 'var(--text-light)', margin: '0 auto 16px auto' }} />
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 800 }}>No healthcare practitioners found</h3>
-          <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginTop: '6px', maxWidth: '400px', margin: '6px auto 0 auto' }}>
-            We couldn't find any doctor matching "{search}". Try clearing your specialty or location filters.
+      {/* LOADING STATE */}
+      {(isLoading || isLocating) && (
+        <Card style={{ padding: '48px 24px', textAlign: 'center', borderRadius: '20px' }}>
+          <RefreshCw size={28} className="animate-spin" style={{ color: 'var(--primary)', margin: '0 auto 12px auto' }} />
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', fontWeight: 600, margin: 0 }}>
+            {isLocating
+              ? 'Detecting your live GPS location...'
+              : `Scanning verified doctors near ${location.label}...`}
           </p>
         </Card>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }} className="grid-2-mobile">
+      )}
+
+      {/* ERROR STATE */}
+      {!isLoading && !isLocating && errorMsg && (
+        <Card style={{ padding: '32px 24px', textAlign: 'center', borderRadius: '20px', border: '1px solid #fecaca', backgroundColor: '#fef2f2' }}>
+          <AlertCircle size={32} style={{ color: '#dc2626', margin: '0 auto 10px auto' }} />
+          <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#991b1b', margin: '0 0 6px 0' }}>
+            Unable to load nearby doctors
+          </h3>
+          <p style={{ fontSize: '0.86rem', color: '#b91c1c', margin: '0 0 16px 0' }}>{errorMsg}</p>
+          <Button onClick={loadDoctors} style={{ borderRadius: '12px' }}>
+            Try Again
+          </Button>
+        </Card>
+      )}
+
+      {/* EMPTY STATE */}
+      {!isLoading && !isLocating && !errorMsg && filteredDoctors.length === 0 && (
+        <Card style={{ padding: '56px 24px', textAlign: 'center', borderRadius: '20px' }}>
+          <Stethoscope size={42} style={{ color: 'var(--text-light)', margin: '0 auto 14px auto' }} />
+          <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-main)', margin: 0 }}>
+            No verified doctors found near this location.
+          </h3>
+          <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', maxWidth: '480px', margin: '8px auto 18px auto' }}>
+            {doctors.length === 0
+              ? location.lat !== undefined
+                ? `No approved and active doctors were found within ${radiusKm} km of ${location.label}.`
+                : `No approved and active doctors matched ${location.label}.`
+              : 'No doctors match your active search or specialization filters.'}
+          </p>
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            {location.lat !== undefined && radiusKm < 100 && (
+              <Button onClick={handleExpandRadius} style={{ borderRadius: '10px' }}>
+                Expand Search Radius
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setIsLocationModalOpen(true)} style={{ borderRadius: '10px' }}>
+              Change Location
+            </Button>
+            {doctors.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSearch('');
+                  setSpecialization('All');
+                  setConsultationType('All');
+                }}
+                style={{ borderRadius: '10px' }}
+              >
+                Clear Filters
+              </Button>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {/* DOCTORS CARDS GRID */}
+      {!isLoading && !isLocating && !errorMsg && filteredDoctors.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' }}>
           {filteredDoctors.map((doc) => (
-            <Card 
+            <Card
               key={doc.id}
               style={{
-                borderRadius: '24px',
+                borderRadius: '20px',
                 border: '1px solid var(--border)',
-                backgroundColor: 'white',
-                padding: '24px',
+                padding: '22px',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
-                transition: 'all 0.25s ease'
+                gap: '16px',
+                boxShadow: 'var(--shadow-sm)'
               }}
             >
               <div>
-                {/* Doctor Avatar Header */}
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', marginBottom: '16px' }}>
-                  <div style={{ position: 'relative' }}>
-                    <div style={{
-                      width: '64px',
-                      height: '64px',
-                      borderRadius: '20px',
-                      background: 'linear-gradient(135deg, #0f766e 0%, #10b981 100%)',
-                      color: 'white',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 800,
-                      fontSize: '1.25rem',
-                      boxShadow: '0 4px 12px rgba(15, 118, 110, 0.25)',
-                      flexShrink: 0
-                    }}>
-                      {doc.name.replace('Dr. ', '').split(' ').map(n => n[0]).join('')}
-                    </div>
-                    <div style={{ position: 'absolute', bottom: '-4px', right: '-4px', backgroundColor: '#10b981', color: 'white', borderRadius: '50%', padding: '3px', boxShadow: '0 2px 6px rgba(0,0,0,0.2)' }} title="NMC License Verified">
-                      <CheckCircle2 size={14} />
+                {/* Header */}
+                <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    {doc.avatarUrl ? (
+                      <img
+                        src={doc.avatarUrl}
+                        alt={doc.name}
+                        style={{
+                          width: '62px',
+                          height: '62px',
+                          borderRadius: '16px',
+                          objectFit: 'cover',
+                          border: '2px solid var(--border)'
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: '62px',
+                          height: '62px',
+                          borderRadius: '16px',
+                          background: 'linear-gradient(135deg, #0f766e 0%, #10b981 100%)',
+                          color: 'white',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 800,
+                          fontSize: '1.2rem'
+                        }}
+                      >
+                        {doc.name.replace(/^Dr\.?\s*/i, '').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() || 'DR'}
+                      </div>
+                    )}
+                    <div
+                      title="Verified & Approved Doctor"
+                      style={{
+                        position: 'absolute',
+                        bottom: '-4px',
+                        right: '-4px',
+                        backgroundColor: '#10b981',
+                        color: 'white',
+                        borderRadius: '50%',
+                        padding: '3px',
+                        border: '2px solid white'
+                      }}
+                    >
+                      <CheckCircle2 size={13} />
                     </div>
                   </div>
 
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div>
-                        <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-dark)' }}>{doc.name}</h3>
-                        <span style={{ fontSize: '0.82rem', color: 'var(--primary)', fontWeight: 800 }}>
-                          {doc.specialty} • {doc.experience} Yrs Exp
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', flexWrap: 'wrap' }}>
+                      <h3 style={{ fontSize: '1.08rem', fontWeight: 800, color: 'var(--text-main)', margin: 0 }}>
+                        {doc.name}
+                      </h3>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span
+                          style={{
+                            backgroundColor: '#ecfdf5',
+                            color: '#047857',
+                            border: '1px solid #a7f3d0',
+                            fontSize: '0.68rem',
+                            fontWeight: 800,
+                            padding: '2px 8px',
+                            borderRadius: '10px',
+                            whiteSpace: 'nowrap',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}
+                        >
+                          <CheckCircle2 size={10} />
+                          Verified
                         </span>
+                        {doc.distanceText && (
+                          <span
+                            style={{
+                              backgroundColor: doc.distanceKm !== null && doc.distanceKm !== undefined && doc.distanceKm <= 5 ? '#ecfdf5' : '#eff6ff',
+                              color: doc.distanceKm !== null && doc.distanceKm !== undefined && doc.distanceKm <= 5 ? '#047857' : '#1d4ed8',
+                              border: `1px solid ${doc.distanceKm !== null && doc.distanceKm !== undefined && doc.distanceKm <= 5 ? '#a7f3d0' : '#bfdbfe'}`,
+                              fontSize: '0.7rem',
+                              fontWeight: 800,
+                              padding: '2px 8px',
+                              borderRadius: '10px',
+                              whiteSpace: 'nowrap',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                          >
+                            <Navigation size={10} />
+                            {doc.distanceText}
+                          </span>
+                        )}
                       </div>
-                      
-                      {doc.rating ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: '#fffbebfb', border: '1px solid #fde68a', padding: '4px 10px', borderRadius: '12px', color: '#d97706', fontSize: '0.82rem', fontWeight: 800 }}>
-                          <Star size={14} fill="#f59e0b" style={{ color: '#f59e0b' }} />
-                          <span>{doc.rating}</span>
-                        </div>
-                      ) : (
-                        <div style={{ backgroundColor: '#f1f5f9', color: '#64748b', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 800 }}>
-                          🆕 New Practitioner
-                        </div>
-                      )}
                     </div>
-
-                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 600 }}>
-                      {doc.education || 'MBBS, Specialist Medical Practitioner'}
-                    </p>
+                    <div style={{ fontSize: '0.84rem', color: 'var(--primary)', fontWeight: 700, marginTop: '2px' }}>
+                      {doc.specialization} • {doc.experienceYears} yrs exp
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, marginTop: '3px' }}>
+                      {doc.qualifications}
+                    </div>
                   </div>
                 </div>
 
-                {/* About Bio */}
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: '1.5', marginBottom: '16px', minHeight: '40px' }}>
-                  {doc.about}
-                </p>
-
-                {/* Info List */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.82rem', color: 'var(--text-muted)', borderTop: '1px solid #f1f5f9', paddingTop: '14px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Building2 size={15} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-                    <span style={{ fontWeight: 600, color: 'var(--text-dark)' }}>{doc.clinicName || 'Specialist Health Clinic'}</span>
-                  </div>
+                {/* Details */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--border)', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  {(doc.clinicName || doc.clinicAddress || doc.city) && (
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                      <Building2 size={15} style={{ color: 'var(--primary)', flexShrink: 0, marginTop: '2px' }} />
+                      <span>
+                        <strong style={{ color: 'var(--text-main)' }}>{doc.clinicName || 'Clinic'}</strong>
+                        {([doc.clinicAddress, doc.city, doc.state, doc.pincode].filter(Boolean).length > 0)
+                          ? ` — ${[doc.clinicAddress, doc.city, doc.state, doc.pincode].filter(Boolean).join(', ')}`
+                          : ''}
+                      </span>
+                    </div>
+                  )}
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <MapPin size={15} style={{ color: 'var(--text-light)', flexShrink: 0 }} />
-                    <span>{doc.location}</span>
+                    <span>
+                      Consultation: <strong style={{ color: 'var(--text-main)' }}>{doc.consultationTypes.join(' & ')}</strong>
+                    </span>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <Clock size={15} style={{ color: 'var(--text-light)', flexShrink: 0 }} />
-                    <span>{doc.availability}</span>
+                    <span>{doc.availabilityText || `Available: ${doc.availableDays.join(', ')}`}</span>
                   </div>
+
+                  {doc.availableSlots && doc.availableSlots.length > 0 && (
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                      {doc.availableSlots.slice(0, 4).map((slot) => (
+                        <span
+                          key={slot}
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            padding: '3px 8px',
+                            borderRadius: '8px',
+                            backgroundColor: 'var(--secondary-light)',
+                            color: 'var(--secondary)',
+                            border: '1px solid #99f6e4'
+                          }}
+                        >
+                          {slot}
+                        </span>
+                      ))}
+                      {doc.availableSlots.length > 4 && (
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-light)', fontWeight: 600, padding: '3px 4px' }}>
+                          +{doc.availableSlots.length - 4} more
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Card Footer: Fee & Booking Button */}
-              <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px', marginTop: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {/* Footer */}
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
                 <div>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-light)', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Consultation Fee</span>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-dark)' }}>
-                    ₹{doc.fee} <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>/ Session</span>
-                  </div>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-light)', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>
+                    Consultation Fee
+                  </span>
+                  <span style={{ fontSize: '1.18rem', fontWeight: 900, color: 'var(--text-main)' }}>
+                    ₹{doc.consultationFee}
+                  </span>
                 </div>
 
-                <Button 
-                  onClick={() => handleOpenBooking(doc)}
+                <Button
+                  onClick={() => navigate(`/patient/doctors/${doc.id}`)}
                   style={{
-                    backgroundColor: 'var(--primary)',
-                    color: 'white',
-                    borderRadius: '14px',
-                    padding: '12px 22px',
+                    borderRadius: '12px',
+                    padding: '10px 18px',
                     fontWeight: 800,
-                    fontSize: '0.9rem',
-                    boxShadow: '0 4px 14px rgba(15, 118, 110, 0.3)'
+                    fontSize: '0.86rem'
                   }}
                 >
-                  Book Consultation
+                  Book Appointment
                 </Button>
               </div>
-
             </Card>
           ))}
         </div>
       )}
 
-      {/* PRACTO REAL SLOT SELECTION & BOOKING MODAL */}
-      <Modal isOpen={isBookingOpen} onClose={() => setIsBookingOpen(false)} title={`Book Consultation: ${selectedDoc?.name}`}>
-        {selectedDoc && (
-          <form onSubmit={handleConfirmBooking} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            
-            {errorMsg && (
-              <div style={{ backgroundColor: 'var(--error-light)', border: '1px solid var(--error)', padding: '12px', borderRadius: '12px', color: 'var(--error)', fontSize: '0.85rem', fontWeight: 600 }}>
-                {errorMsg}
-              </div>
-            )}
-
-            {/* Doctor Info Box */}
-            <div style={{ display: 'flex', gap: '14px', alignItems: 'center', backgroundColor: '#f0fdfa', padding: '14px 18px', borderRadius: '16px', border: '1px solid rgba(15, 118, 110, 0.2)' }}>
-              <img src={selectedDoc.photoUrl} alt={selectedDoc.name} style={{ width: '52px', height: '52px', borderRadius: '14px', objectFit: 'cover' }} />
-              <div>
-                <h4 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-dark)' }}>{selectedDoc.name}</h4>
-                <span style={{ fontSize: '0.78rem', color: 'var(--primary)', fontWeight: 700 }}>
-                  {selectedDoc.specialty} • Consultation Fee: ₹{selectedDoc.fee}
-                </span>
-              </div>
-            </div>
-
-            {/* 1. SELECT DATE CARDS */}
-            <div>
-              <label style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-dark)', display: 'block', marginBottom: '8px' }}>
-                Select Appointment Date *
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }} className="grid-2-mobile">
-                {nextDates.map((item) => (
-                  <button
-                    type="button"
-                    key={item.fullDate}
-                    onClick={() => setSelectedDate(item.fullDate)}
-                    style={{
-                      padding: '10px 8px',
-                      borderRadius: '12px',
-                      border: '2px solid',
-                      borderColor: selectedDate === item.fullDate ? 'var(--primary)' : 'var(--border)',
-                      backgroundColor: selectedDate === item.fullDate ? 'var(--primary-light)' : 'white',
-                      color: selectedDate === item.fullDate ? 'var(--primary)' : 'var(--text-dark)',
-                      fontWeight: 800,
-                      fontSize: '0.82rem',
-                      cursor: 'pointer',
-                      textAlign: 'center'
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 2. SELECT TIME SLOT CHIPS */}
-            <div>
-              <label style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-dark)', display: 'block', marginBottom: '8px' }}>
-                Select Real Available Slot *
-              </label>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {availableTimeSlots.map((slot) => (
-                  <button
-                    type="button"
-                    key={slot}
-                    onClick={() => setSelectedTimeSlot(slot)}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: '12px',
-                      border: '1.5px solid',
-                      borderColor: selectedTimeSlot === slot ? 'var(--primary)' : 'var(--border)',
-                      backgroundColor: selectedTimeSlot === slot ? 'var(--primary)' : 'white',
-                      color: selectedTimeSlot === slot ? 'white' : 'var(--text-dark)',
-                      fontWeight: 700,
-                      fontSize: '0.82rem',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {slot}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 3. CONSULTATION MODE */}
-            <div>
-              <label style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-dark)', display: 'block', marginBottom: '8px' }}>
-                Consultation Mode *
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => setConsultMode('Video')}
-                  style={{
-                    padding: '12px',
-                    borderRadius: '12px',
-                    border: '2px solid',
-                    borderColor: consultMode === 'Video' ? 'var(--primary)' : 'var(--border)',
-                    backgroundColor: consultMode === 'Video' ? 'var(--primary-light)' : 'white',
-                    color: consultMode === 'Video' ? 'var(--primary)' : 'var(--text-dark)',
-                    fontWeight: 800,
-                    fontSize: '0.88rem',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px'
-                  }}
-                >
-                  <Video size={18} />
-                  HD Video Consultation
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setConsultMode('In-Person')}
-                  style={{
-                    padding: '12px',
-                    borderRadius: '12px',
-                    border: '2px solid',
-                    borderColor: consultMode === 'In-Person' ? 'var(--primary)' : 'var(--border)',
-                    backgroundColor: consultMode === 'In-Person' ? 'var(--primary-light)' : 'white',
-                    color: consultMode === 'In-Person' ? 'var(--primary)' : 'var(--text-dark)',
-                    fontWeight: 800,
-                    fontSize: '0.88rem',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px'
-                  }}
-                >
-                  <Building2 size={18} />
-                  In-Person Clinic Visit
-                </button>
-              </div>
-            </div>
-
-            <Input 
-              label="Patient Symptoms / Reason for Visit" 
-              placeholder="e.g. Follow-up on blood pressure lab results, chest tightness, or routine checkup" 
-              value={symptomsNotes}
-              onChange={(e) => setSymptomsNotes(e.target.value)}
-              disabled={isSubmitting}
+      {/* CHANGE LOCATION MODAL */}
+      <Modal isOpen={isLocationModalOpen} onClose={() => setIsLocationModalOpen(false)} title="Change Consultation Location">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', padding: '8px 0' }}>
+          <form onSubmit={handleManualLocationSubmit} style={{ display: 'flex', gap: '10px' }}>
+            <Input
+              placeholder="Search by city, locality or PIN code (e.g. Bengaluru, 560001)..."
+              value={manualQuery}
+              onChange={(e) => setManualQuery(e.target.value)}
+              icon={<Search size={16} />}
+              style={{ flex: 1, borderRadius: '12px' }}
             />
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
-              <Button type="button" variant="outline" onClick={() => setIsBookingOpen(false)} disabled={isSubmitting} style={{ borderRadius: '12px' }}>
-                Cancel
-              </Button>
-              <Button type="submit" isLoading={isSubmitting} style={{ borderRadius: '12px', backgroundColor: 'var(--primary)', padding: '12px 28px', fontWeight: 800 }}>
-                Confirm & Lock Consultation Slot
-              </Button>
-            </div>
+            <Button type="submit" style={{ borderRadius: '12px', padding: '0 20px', fontWeight: 800 }}>
+              Search
+            </Button>
           </form>
-        )}
-      </Modal>
 
-      {toastMsg && (
-        <Toast message={toastMsg} onClose={() => setToastMsg('')} />
-      )}
+          <div>
+            <span style={{ fontSize: '0.76rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-light)', letterSpacing: '0.04em', display: 'block', marginBottom: '10px' }}>
+              Or choose a major healthcare hub:
+            </span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }} className="grid-2-mobile">
+              {POPULAR_HUBS.map((hub) => (
+                <button
+                  key={hub.name}
+                  type="button"
+                  onClick={() => handleSelectHub(hub)}
+                  style={{
+                    border: '1px solid var(--border)',
+                    backgroundColor: 'var(--surface)',
+                    borderRadius: '12px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Building2 size={16} style={{ color: 'var(--primary)' }} />
+                    <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-main)' }}>{hub.name}</span>
+                  </div>
+                  <ChevronRight size={14} style={{ color: 'var(--text-light)' }} />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleResetToGps}
+              style={{
+                borderRadius: '10px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontWeight: 700
+              }}
+            >
+              <Crosshair size={15} />
+              Use Current GPS
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setIsLocationModalOpen(false)} style={{ borderRadius: '10px' }}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

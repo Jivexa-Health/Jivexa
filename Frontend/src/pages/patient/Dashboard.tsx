@@ -9,8 +9,10 @@ import { Select } from '../../components/ui/Select';
 import { 
   Heart, MessageSquare, Clipboard, Calendar, Pill, 
   Activity, ArrowRight, Star, Clock, AlertCircle, Plus, Check, Sparkles,
-  ShieldCheck, Copy, QrCode, Lock, CheckCircle2, XCircle, UserCheck, Siren, Edit3, Droplet, Footprints, MapPin, RefreshCw, FileText
+  ShieldCheck, Copy, QrCode, Lock, CheckCircle2, XCircle, UserCheck, Siren, Edit3, Droplet, Footprints, MapPin, RefreshCw, FileText,
+  Navigation, Stethoscope
 } from 'lucide-react';
+import { fetchNearbyDoctorsApi, VerifiedDoctor } from '../../services/doctorService';
 import { Toast } from '../../components/ui/Toast';
 import { Modal } from '../../components/ui/Modal';
 import { isPatientMvpOnly } from '../../config';
@@ -33,6 +35,10 @@ export const PatientDashboard: React.FC = () => {
   // Real-Time GPS Geolocation State
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; address: string } | null>(null);
   const [isLocating, setIsLocating] = useState(false);
+
+  // Nearby Verified Doctors State
+  const [nearbyDocs, setNearbyDocs] = useState<VerifiedDoctor[]>([]);
+  const [isLoadingNearbyDocs, setIsLoadingNearbyDocs] = useState(false);
 
   // Daily vitals real-time interactive tracking state with LocalStorage persistence
   const [dailyWater, setDailyWater] = useState<number>(() => {
@@ -102,6 +108,32 @@ export const PatientDashboard: React.FC = () => {
   React.useEffect(() => {
     detectLiveGPSLocation();
   }, []);
+
+  // Automatically fetch verified doctors near patient GPS coordinates
+  React.useEffect(() => {
+    let isCancelled = false;
+    const fetchDoctors = async () => {
+      setIsLoadingNearbyDocs(true);
+      try {
+        const params = userLocation
+          ? { latitude: userLocation.lat, longitude: userLocation.lng, radius: 25 }
+          : { radius: 25 };
+        const res = await fetchNearbyDoctorsApi(params);
+        if (!isCancelled) {
+          setNearbyDocs(res.doctors || []);
+        }
+      } catch (err) {
+        console.warn('Dashboard nearby doctors lookup failed:', err);
+      } finally {
+        if (!isCancelled) setIsLoadingNearbyDocs(false);
+      }
+    };
+
+    fetchDoctors();
+    return () => {
+      isCancelled = true;
+    };
+  }, [userLocation]);
 
   // Edit Profile Form State
   const [editForm, setEditForm] = useState({
@@ -433,6 +465,22 @@ export const PatientDashboard: React.FC = () => {
             >
               <MessageSquare size={16} />
               Talk to JIVEXA AI
+            </Button>
+            <Button 
+              variant="secondary"
+              onClick={() => navigate('/patient/doctors')}
+              style={{
+                borderRadius: '12px',
+                padding: '10px 20px',
+                fontWeight: 700,
+                fontSize: '0.88rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <Calendar size={16} />
+              Find Doctor
             </Button>
           </div>
         ) : (
@@ -932,7 +980,7 @@ export const PatientDashboard: React.FC = () => {
 
           </div>
 
-          {isPatientMvpOnly() ? (
+          {false ? (
             /* COMING SOON CAPABILITIES (NON-CLICKABLE ROADMAP SECTION) */
             <Card 
               title={
@@ -984,6 +1032,178 @@ export const PatientDashboard: React.FC = () => {
               </div>
             </Card>
           ) : (
+            <>
+              {/* GPS-BASED FIND MY DOCTOR NEARBY CARD */}
+              <Card
+                title={
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      backgroundColor: 'rgba(13, 148, 136, 0.1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#0d9488'
+                    }}>
+                      <Stethoscope size={18} />
+                    </div>
+                    <div>
+                      <span style={{ fontWeight: 800, fontSize: '1.02rem', color: '#0f172a' }}>Nearby Verified Doctors</span>
+                      {userLocation && (
+                        <span style={{ display: 'block', fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                          📍 Showing practitioners near {userLocation.address.split('(')[0].trim() || 'your location'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                }
+                headerAction={
+                  <Link
+                    to="/patient/doctors"
+                    style={{
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      color: '#0d9488',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      textDecoration: 'none'
+                    }}
+                  >
+                    <span>Explore All</span>
+                    <ArrowRight size={14} />
+                  </Link>
+                }
+              >
+                {isLoadingNearbyDocs ? (
+                  <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 10px', color: '#0d9488' }} />
+                    <p style={{ fontSize: '0.85rem' }}>Scanning for verified doctors nearby...</p>
+                  </div>
+                ) : nearbyDocs.length === 0 ? (
+                  <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <MapPin size={28} style={{ color: 'var(--text-light)', marginBottom: '8px' }} />
+                    <p style={{ fontSize: '0.88rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>No verified doctors found within 25 km</p>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '14px' }}>Expand search radius or explore practitioners in other cities.</p>
+                    <Button variant="outline" size="sm" onClick={() => navigate('/patient/doctors')}>
+                      Open Find My Doctor Directory
+                    </Button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {nearbyDocs.slice(0, 3).map((doc) => {
+                      const doctorId = doc.id || doc._id;
+                      return (
+                      <div
+                        key={doctorId}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '12px 14px',
+                          border: '1px solid var(--border)',
+                          borderRadius: '12px',
+                          backgroundColor: '#f8fafc',
+                          transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+                        }}
+                        className="flex-col-mobile gap-sm"
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <div style={{
+                            width: '42px',
+                            height: '42px',
+                            borderRadius: '50%',
+                            backgroundColor: '#e0f2fe',
+                            color: '#0369a1',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 800,
+                            fontSize: '0.95rem',
+                            flexShrink: 0
+                          }}>
+                            {doc.name.replace('Dr.', '').trim().charAt(0) || 'D'}
+                          </div>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <h4 style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                                {doc.name}
+                              </h4>
+                              <span style={{
+                                fontSize: '0.65rem',
+                                fontWeight: 800,
+                                backgroundColor: '#dcfce7',
+                                color: '#166534',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '2px'
+                              }}>
+                                <CheckCircle2 size={10} /> Verified
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.78rem', color: '#0d9488', fontWeight: 700 }}>
+                                {doc.specialization}
+                              </span>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>•</span>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {doc.clinicName || 'Clinical Consultation'} {doc.city ? `(${doc.city})` : ''}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }} className="w-100-mobile justify-between">
+                          <div style={{ textAlign: 'right' }} className="text-left-mobile">
+                            {doc.distanceText ? (
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                fontSize: '0.72rem',
+                                fontWeight: 800,
+                                color: '#0369a1',
+                                backgroundColor: '#e0f2fe',
+                                padding: '2px 8px',
+                                borderRadius: '6px'
+                              }}>
+                                <Navigation size={10} /> {doc.distanceText}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                {doc.experienceYears ? `${doc.experienceYears}y exp` : 'Verified'}
+                              </span>
+                            )}
+                            <span style={{ display: 'block', fontSize: '0.84rem', fontWeight: 800, color: '#0f172a', marginTop: '2px' }}>
+                              {doc.consultationFee ? `₹${doc.consultationFee}` : 'Free'}
+                            </span>
+                          </div>
+
+                          <Button
+                            size="sm"
+                            onClick={() => navigate(`/patient/doctors/${doctorId}`)}
+                            style={{
+                              padding: '6px 14px',
+                              fontSize: '0.78rem',
+                              fontWeight: 700,
+                              borderRadius: '8px',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            Book Visit
+                          </Button>
+                        </div>
+                      </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+
             <Card 
               title="Upcoming Consultations"
               headerAction={
@@ -1041,6 +1261,7 @@ export const PatientDashboard: React.FC = () => {
                 </div>
               )}
             </Card>
+            </>
           )}
 
           <div>

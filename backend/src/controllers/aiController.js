@@ -4,6 +4,7 @@
  * and authenticated medical report persistence with doctor-patient access control.
  */
 
+const { performance } = require('perf_hooks');
 const { streamGeneralChatbot, streamReportChatbot, streamLiveAiResponse, analyzeReportWithAI, aiMetrics } = require('../services/aiService');
 const { getUserUsage, checkTokenLimit, recordTokenUsage, upgradeSubscription, FREE_TIER_TOKEN_LIMIT } = require('../services/tokenUsageService');
 const { MongoDb } = require('../services/mongoDbService');
@@ -75,17 +76,12 @@ const checkRateLimit = (userId) => {
  * Streaming SSE AI Chat Controller (Doctor-Style & Health-Only)
  */
 const handleChatRequest = async (req, res) => {
-  let user = req.user || null;
-  const passedUserId = req.body.userId;
-  if (!user && passedUserId && passedUserId !== 'anonymous_user') {
-    try {
-      user = await User.findOne({ _id: String(passedUserId) });
-    } catch (e) {}
-  }
-
-  const userId = user ? String(user._id || user.id) : (passedUserId || 'anonymous_user');
+  const reqStart = performance.now();
+  // Strictly authenticate from verified JWT middleware (req.user) to enforce patient isolation
+  const user = req.user || null;
+  const userId = user ? String(user._id || user.id) : 'anonymous_user';
   const userProfile = user ? {
-    id: String(user._id),
+    id: String(user._id || user.id),
     name: user.name,
     age: user.age || null,
     role: user.role || 'PATIENT'
@@ -106,11 +102,13 @@ const handleChatRequest = async (req, res) => {
   }
 
   const safeHistory = Array.isArray(history)
-    ? history.filter(h => h && typeof (h.text || h.content || h.message) === 'string').slice(-30)
+    ? history.filter(h => h && typeof (h.text || h.content || h.message) === 'string').slice(-16)
     : [];
 
+  const rateKey = user ? userId : `anonymous_${req.ip || 'local'}`;
+
   // 1. Rate Limiting Check
-  if (!checkRateLimit(userId)) {
+  if (!checkRateLimit(rateKey)) {
     return res.status(429).json({
       error: 'Too many requests. Please wait a moment before sending another message.',
       rateLimited: true
@@ -129,50 +127,41 @@ const handleChatRequest = async (req, res) => {
     });
   }
 
-  // 3. User Name Declaration Check
+  // 3. Non-blocking User Name Declaration Update (in-memory userProfile updated immediately)
   const declaredName = extractNameFromText(message);
   if (declaredName && user) {
-    try {
-      await User.findByIdAndUpdate(user._id, { name: declaredName });
-      user.name = declaredName;
-      if (userProfile) userProfile.name = declaredName;
-    } catch (nameErr) {
-      console.warn('[AI Controller Name Update Notice]:', nameErr.message);
-    }
+    user.name = declaredName;
+    if (userProfile) userProfile.name = declaredName;
+    User.findByIdAndUpdate(user._id, { name: declaredName }).catch(() => {});
   }
 
-  // 4. Retrieve Cross-Conversation Memory
+  // 4. Only query cross-conversation memory when user.name is missing AND user explicitly asks for their name
   let crossConversationContext = '';
-  if (user && isDatabaseConnected()) {
+  const asksForName = /\b(mera\s+naam|mera\s+name|what\s+is\s+my\s+name|do\s+you\s+know\s+my\s+name)\b/i.test(message);
+  if (user && !user.name && asksForName && isDatabaseConnected()) {
     try {
       const pastConvs = await MongoDb.conversations.find({ userId: String(user._id) });
       if (Array.isArray(pastConvs) && pastConvs.length > 0) {
-        const memoryFacts = [];
         for (const c of pastConvs.slice(0, 5)) {
           if (c._id === conversationId) continue;
-          if (c.messages && c.messages.length > 0) {
-            const firstUserMsg = c.messages.find(m => m.sender === 'user')?.text;
-            if (firstUserMsg) {
-              const nameMatch = extractNameFromText(firstUserMsg);
-              if (nameMatch) {
-                memoryFacts.push(`User previously stated their name is: ${nameMatch}`);
-              }
-            }
+          const firstUserMsg = c.messages?.find(m => m.sender === 'user')?.text;
+          const nameMatch = firstUserMsg ? extractNameFromText(firstUserMsg) : null;
+          if (nameMatch) {
+            crossConversationContext = `User previously stated their name is: ${nameMatch}`;
+            break;
           }
-        }
-        if (memoryFacts.length > 0) {
-          crossConversationContext = [...new Set(memoryFacts)].join('\n');
         }
       }
     } catch (memErr) {
-      console.warn('[AI Controller] Cross-conversation memory retrieval notice:', memErr.message);
+      console.warn('[AI Controller] Memory lookup notice:', memErr.message);
     }
   }
 
-  // Setup Server-Sent Events (SSE) streaming headers
+  // Setup Server-Sent Events (SSE) streaming headers with proxy buffering disabled
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders && res.flushHeaders();
 
   let isResponseActive = true;
@@ -194,14 +183,36 @@ const handleChatRequest = async (req, res) => {
       reportContext
     );
 
-    // Record token usage
     const updatedUsage = recordTokenUsage(userId, aiResult.inputTokens, aiResult.outputTokens);
+    const totalRequestMs = Math.round((performance.now() - reqStart) * 100) / 100;
+    const geminiMs = aiResult.timing?.geminiMs ?? 0;
 
-    // Auto-persist conversation turn in MongoDB if user is authenticated and conversationId is present
-    if (user && conversationId && aiResult.text && isDatabaseConnected()) {
+    // Emit final SSE completion event immediately so client is not blocked by DB persistence
+    if (isResponseActive && !res.writableEnded) {
+      res.write(`data: ${JSON.stringify({
+        done: true,
+        provider: aiResult.provider,
+        replaceText: aiResult.replaceText || null,
+        errorCode: aiResult.errorCode || null,
+        tokensUsed: updatedUsage.tokensUsedThisPeriod,
+        subscriptionStatus: updatedUsage.subscriptionStatus,
+        isEmergency: aiResult.isEmergency || false,
+        suggestions: aiResult.suggestions || [],
+        structuredData: aiResult.structuredData || null,
+        timing: {
+          requestMs: totalRequestMs,
+          geminiMs,
+          ttftMs: aiResult.timing?.ttftMs ?? 0,
+          contextMs: aiResult.timing?.contextMs ?? 0
+        }
+      })}\n\n`);
+    }
+
+    // Persist conversation turn atomically (single upsert using safeHistory + new turn, avoiding extra pre-reads)
+    if (user && conversationId && aiResult.text) {
       try {
+        const authUserId = String(user._id || user.id);
         const convId = String(conversationId);
-        const existingConv = await MongoDb.conversations.findOne({ _id: convId, userId: String(user._id) });
         const userMsgObj = {
           id: `msg_user_${Date.now()}`,
           sender: 'user',
@@ -209,49 +220,48 @@ const handleChatRequest = async (req, res) => {
           timestamp: new Date()
         };
         const aiMsgObj = {
-          id: `msg_ai_${Date.now()}`,
+          id: `msg_ai_${Date.now() + 1}`,
           sender: 'ai',
           text: aiResult.text,
           timestamp: new Date(),
-          provider: aiResult.provider || 'JIVEXA AI (Google Gemini)',
+          provider: aiResult.provider || 'JIVEXA Health AI',
           isEmergency: Boolean(aiResult.isEmergency)
         };
-        const title = existingConv?.title && existingConv.title !== 'New Conversation'
-          ? existingConv.title
-          : (message.trim().slice(0, 32) + (message.trim().length > 32 ? '...' : ''));
-        const updatedMessages = existingConv ? [...existingConv.messages, userMsgObj, aiMsgObj] : [userMsgObj, aiMsgObj];
-        await MongoDb.conversations.upsert(convId, user._id, {
+        const priorMessages = safeHistory.map((h, i) => ({
+          id: `msg_hist_${Date.now()}_${i}`,
+          sender: h.sender === 'user' ? 'user' : 'ai',
+          text: String(h.text || h.content || h.message || '').trim(),
+          timestamp: new Date()
+        })).filter(m => m.text);
+        const title = (priorMessages[0]?.text || message.trim()).slice(0, 32) + ((priorMessages[0]?.text || message.trim()).length > 32 ? '...' : '');
+        await MongoDb.conversations.upsert(convId, authUserId, {
           title,
-          messages: updatedMessages
+          messages: [...priorMessages, userMsgObj, aiMsgObj]
         });
       } catch (saveErr) {
-        console.warn('[AI Controller Auto-Persist Notice]:', saveErr.message);
+        if (saveErr.message === 'Unauthorized conversation update') {
+          console.warn('[AI Controller] Blocked cross-patient conversation write attempt');
+        } else {
+          console.warn('[AI Controller Auto-Persist Notice]:', saveErr.message);
+        }
       }
     }
 
-    // Send final payload with token usage details and error status
+    console.log(`[JIVEXA Chat Request] requestMs=${totalRequestMs} geminiMs=${geminiMs} ttftMs=${aiResult.timing?.ttftMs ?? 0} status=${aiResult.errorCode || 'ok'}`);
+
     if (isResponseActive && !res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ 
-        done: true, 
-        provider: aiResult.provider,
-        errorCode: aiResult.errorCode || null,
-        tokensUsed: updatedUsage.tokensUsedThisPeriod,
-        subscriptionStatus: updatedUsage.subscriptionStatus,
-        isEmergency: aiResult.isEmergency || false,
-        suggestions: aiResult.suggestions || [],
-        structuredData: aiResult.structuredData || null
-      })}\n\n`);
       res.end();
     }
   } catch (error) {
-    console.error('[JIVEXA AI Controller Error]', error.message);
+    const totalRequestMs = Math.round((performance.now() - reqStart) * 100) / 100;
+    console.error(`[JIVEXA AI Controller Error] requestMs=${totalRequestMs} err=${error.message}`);
     aiMetrics.errors++;
     if (isResponseActive && !res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ 
+      res.write(`data: ${JSON.stringify({
         error: 'AI_TEMPORARILY_UNAVAILABLE: JIVEXA Assistant is temporarily unavailable, please try again in a moment.',
         errorCode: 'AI_TEMPORARILY_UNAVAILABLE',
         suggestions: [],
-        done: true 
+        done: true
       })}\n\n`);
       res.end();
     }
@@ -292,8 +302,10 @@ const handleReportChatRequest = async (req, res) => {
     ? history.filter(h => h && typeof (h.text || h.content || h.message) === 'string').slice(-30)
     : [];
 
+  const rateKey = user ? userId : `anonymous_${req.ip || 'local'}`;
+
   // 1. Rate Limiting Check
-  if (!checkRateLimit(userId)) {
+  if (!checkRateLimit(rateKey)) {
     return res.status(429).json({
       error: 'Too many requests. Please wait a moment before sending another message.',
       rateLimited: true
@@ -629,31 +641,56 @@ const shareMedicalReport = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Doctor ID is required for sharing' });
     }
 
-    if (!isDatabaseConnected()) {
-      return res.status(200).json({
-        success: true,
-        message: `Report sharing request recorded for Dr. ${doctorName || doctorId}`
-      });
-    }
-
     const report = await MongoDb.medicalReports.findById(id);
     if (!report) {
       return res.status(404).json({ success: false, error: 'Medical report not found' });
     }
 
-    if (report.patientId !== patientId) {
+    if (String(report.patientId) !== patientId) {
       return res.status(403).json({ success: false, error: 'You can only share your own medical reports' });
     }
 
-    const updated = await MongoDb.medicalReports.shareWithDoctor(id, patientId, { doctorId, doctorName });
+    const docUser = await MongoDb.users.findById(doctorId);
+    const resolvedDocName = docUser ? docUser.name : (doctorName || 'Doctor');
+
+    const updated = await MongoDb.medicalReports.shareWithDoctor(id, patientId, {
+      doctorId: String(doctorId),
+      doctorName: resolvedDocName
+    });
     return res.json({
       success: true,
-      message: `Medical report shared successfully with Dr. ${doctorName || doctorId}`,
+      message: `Medical report shared successfully with ${resolvedDocName}`,
       report: updated
     });
   } catch (error) {
     console.error('[AI Controller Share Report Error]:', error);
     return res.status(500).json({ success: false, error: 'Failed to share medical report' });
+  }
+};
+
+/**
+ * Revoke Doctor Access to a Shared Medical Report
+ */
+const revokeMedicalReportShare = async (req, res) => {
+  try {
+    const { id, doctorId } = req.params;
+    const patientId = String(req.user._id || req.user.id);
+    const targetDoctorId = doctorId || req.body?.doctorId;
+    if (!targetDoctorId) {
+      return res.status(400).json({ success: false, error: 'Doctor ID is required' });
+    }
+    const report = await MongoDb.medicalReports.findById(id);
+    if (!report) {
+      return res.status(404).json({ success: false, error: 'Medical report not found' });
+    }
+    if (String(report.patientId) !== patientId) {
+      return res.status(403).json({ success: false, error: 'You can only manage sharing for your own medical reports' });
+    }
+    const updated = await MongoDb.medicalReports.revokeDoctorAccess(id, patientId, String(targetDoctorId));
+    return res.json({ success: true, message: 'Doctor access revoked for this report', report: updated });
+  } catch (error) {
+    console.error('[AI Controller Revoke Share Error]:', error);
+    return res.status(500).json({ success: false, error: 'Failed to revoke report access' });
   }
 };
 
@@ -742,9 +779,6 @@ const getAdminAiMetrics = (req, res) => {
 const getConversations = async (req, res) => {
   try {
     const userId = String(req.user._id || req.user.id);
-    if (!isDatabaseConnected()) {
-      return res.json({ success: true, count: 0, conversations: [] });
-    }
     const list = await MongoDb.conversations.find({ userId });
     return res.json({
       success: true,
@@ -752,7 +786,7 @@ const getConversations = async (req, res) => {
       conversations: list
     });
   } catch (error) {
-    console.error('[AI Controller Get Conversations Error]:', error);
+    console.error('[AI Controller Get Conversations Error]:', error.message);
     return res.status(500).json({ success: false, error: 'Failed to fetch conversations' });
   }
 };
@@ -761,16 +795,13 @@ const getConversationById = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = String(req.user._id || req.user.id);
-    if (!isDatabaseConnected()) {
-      return res.status(404).json({ success: false, error: 'Database disconnected' });
-    }
     const conv = await MongoDb.conversations.findOne({ _id: String(id), userId });
     if (!conv) {
       return res.status(404).json({ success: false, error: 'Conversation not found' });
     }
     return res.json({ success: true, conversation: conv });
   } catch (error) {
-    console.error('[AI Controller Get Conversation By ID Error]:', error);
+    console.error('[AI Controller Get Conversation By ID Error]:', error.message);
     return res.status(500).json({ success: false, error: 'Failed to fetch conversation' });
   }
 };
@@ -782,10 +813,6 @@ const saveConversation = async (req, res) => {
 
     if (!id || !Array.isArray(messages)) {
       return res.status(400).json({ success: false, error: 'Conversation ID and messages array are required' });
-    }
-
-    if (!isDatabaseConnected()) {
-      return res.json({ success: true, message: 'Conversation cached locally (DB disconnected)' });
     }
 
     const conv = await MongoDb.conversations.upsert(id, userId, {
@@ -813,7 +840,10 @@ const saveConversation = async (req, res) => {
       conversation: conv.toJSON ? conv.toJSON() : conv
     });
   } catch (error) {
-    console.error('[AI Controller Save Conversation Error]:', error);
+    if (error.message === 'Unauthorized conversation update') {
+      return res.status(403).json({ success: false, error: 'Access denied: You cannot modify another user conversation.' });
+    }
+    console.error('[AI Controller Save Conversation Error]:', error.message);
     return res.status(500).json({ success: false, error: 'Failed to save conversation' });
   }
 };
@@ -822,16 +852,13 @@ const deleteConversation = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = String(req.user._id || req.user.id);
-    if (!isDatabaseConnected()) {
-      return res.json({ success: true, message: 'Deleted locally' });
-    }
     const deleted = await MongoDb.conversations.deleteById(id, userId);
     if (!deleted) {
       return res.status(404).json({ success: false, error: 'Conversation not found or not owned by user' });
     }
     return res.json({ success: true, message: 'Conversation deleted successfully' });
   } catch (error) {
-    console.error('[AI Controller Delete Conversation Error]:', error);
+    console.error('[AI Controller Delete Conversation Error]:', error.message);
     return res.status(500).json({ success: false, error: 'Failed to delete conversation' });
   }
 };
@@ -839,9 +866,6 @@ const deleteConversation = async (req, res) => {
 const clearAllConversations = async (req, res) => {
   try {
     const userId = String(req.user._id || req.user.id);
-    if (!isDatabaseConnected()) {
-      return res.json({ success: true, message: 'Cleared locally' });
-    }
     const result = await MongoDb.conversations.deleteMany({ userId });
     return res.json({
       success: true,
@@ -849,7 +873,7 @@ const clearAllConversations = async (req, res) => {
       deletedCount: result.deletedCount || 0
     });
   } catch (error) {
-    console.error('[AI Controller Clear History Error]:', error);
+    console.error('[AI Controller Clear History Error]:', error.message);
     return res.status(500).json({ success: false, error: 'Failed to clear chat history' });
   }
 };
@@ -862,6 +886,7 @@ module.exports = {
   getMedicalReports,
   getMedicalReportById,
   shareMedicalReport,
+  revokeMedicalReportShare,
   deleteMedicalReport,
   getUserUsageStats,
   upgradeUserPro,

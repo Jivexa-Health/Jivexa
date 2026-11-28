@@ -12,6 +12,7 @@ const AmbulanceRequest = require('../models/AmbulanceRequest');
 const Conversation = require('../models/Conversation');
 const MedicalReport = require('../models/MedicalReport');
 const Session = require('../models/Session');
+const AuditLog = require('../models/AuditLog');
 const {
   connectDB,
   disconnectDB,
@@ -32,7 +33,8 @@ const localStore = {
   pharmacyOrders: [],
   ambulanceRequests: [],
   conversations: [],
-  medicalReports: []
+  medicalReports: [],
+  auditLogs: []
 };
 
 // Safe bootstrap from file if available
@@ -60,6 +62,38 @@ const persistLocalStore = () => {
   }, 250);
 };
 
+// Helper: simple dot-path getter for localStore filtering
+const getByPath = (obj, keyPath) => {
+  if (!obj || !keyPath) return undefined;
+  return keyPath.split('.').reduce((acc, part) => (acc !== undefined && acc !== null ? acc[part] : undefined), obj);
+};
+
+const matchesFilter = (doc, filter = {}) => {
+  if (!filter || Object.keys(filter).length === 0) return true;
+  for (const [key, val] of Object.entries(filter)) {
+    if (key === '$or' && Array.isArray(val)) {
+      if (!val.some((sub) => matchesFilter(doc, sub))) return false;
+      continue;
+    }
+    if (key === '$and' && Array.isArray(val)) {
+      if (!val.every((sub) => matchesFilter(doc, sub))) return false;
+      continue;
+    }
+    const docVal = getByPath(doc, key);
+    if (val && typeof val === 'object' && !Array.isArray(val) && !(val instanceof RegExp)) {
+      if (Array.isArray(val.$in)) {
+        if (!val.$in.map(String).includes(String(docVal))) return false;
+      }
+      if (val.$ne !== undefined) {
+        if (String(docVal) === String(val.$ne)) return false;
+      }
+      continue;
+    }
+    if (String(docVal) !== String(val)) return false;
+  }
+  return true;
+};
+
 // Helper: Wrap plain user object to match Mongoose document interface
 const wrapUserDoc = (raw) => {
   if (!raw) return null;
@@ -78,11 +112,22 @@ const wrapUserDoc = (raw) => {
       healthId: this.healthId || '',
       phone: this.phone || '',
       age: this.age !== undefined ? this.age : null,
+      dob: this.dob || '',
+      gender: this.gender || '',
+      address: this.address || '',
       emailVerified: Boolean(this.emailVerified),
       verified: Boolean(this.verified),
       accountStatus: this.accountStatus || 'ACTIVE',
-      avatarUrl: this.avatarUrl || '',
-      usage: this.usage || { tokenUsed: 0, tokenLimit: 10000, totalTokenUsed: 0 }
+      doctorVerification: this.role === 'DOCTOR' ? (this.doctorVerification || null) : null,
+      notificationPreferences: this.notificationPreferences || { inApp: true, email: true, appointmentReminders: true },
+      privacySettings: this.privacySettings || { shareHealthSummaryOnBooking: false, allowEmergencyLookup: true, consentLogsEnabled: true },
+      professionalDetails: this.professionalDetails || null,
+      vehicleDetails: this.vehicleDetails || null,
+      licenseDetails: this.licenseDetails || null,
+      avatarUrl: this.avatarUrl || this.professionalDetails?.avatarUrl || this.usage?.avatarUrl || '',
+      usage: this.usage || { tokenUsed: 0, tokenLimit: 10000, totalTokenUsed: 0 },
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt
     };
   };
 
@@ -96,17 +141,55 @@ const wrapUserDoc = (raw) => {
   };
 
   user.save = async function () {
+    this.updatedAt = new Date();
+    const copy = { ...this };
+    delete copy.save;
+    delete copy.toAuthJSON;
+    delete copy.matchPassword;
+    delete copy.isLocked;
     const idx = localStore.users.findIndex((u) => String(u._id || u.id) === String(this._id));
     if (idx !== -1) {
-      localStore.users[idx] = { ...this };
+      localStore.users[idx] = copy;
     } else {
-      localStore.users.push({ ...this });
+      localStore.users.push(copy);
     }
     persistLocalStore();
     return this;
   };
 
   return user;
+};
+
+// Helper: Wrap Appointment plain object to match Mongoose document interface
+const wrapAppointmentDoc = (raw) => {
+  if (!raw) return null;
+  const doc = { ...raw };
+  doc._id = String(raw._id || raw.id || new mongoose.Types.ObjectId());
+  doc.id = doc._id;
+
+  doc.toJSON = function () {
+    const out = { ...this };
+    delete out.toJSON;
+    delete out.save;
+    return out;
+  };
+
+  doc.save = async function () {
+    this.updatedAt = new Date();
+    const copy = { ...this };
+    delete copy.toJSON;
+    delete copy.save;
+    const idx = localStore.appointments.findIndex((a) => String(a._id || a.id) === String(this._id));
+    if (idx !== -1) {
+      localStore.appointments[idx] = copy;
+    } else {
+      localStore.appointments.push(copy);
+    }
+    persistLocalStore();
+    return this;
+  };
+
+  return doc;
 };
 
 // Helper: Wrap HealthId plain object
@@ -116,11 +199,13 @@ const wrapHealthIdDoc = (raw) => {
   doc._id = String(raw._id || raw.id || new mongoose.Types.ObjectId());
   doc.id = doc._id;
   doc.save = async function () {
+    const copy = { ...this };
+    delete copy.save;
     const idx = localStore.healthIds.findIndex((h) => String(h._id || h.id) === String(this._id));
     if (idx !== -1) {
-      localStore.healthIds[idx] = { ...this };
+      localStore.healthIds[idx] = copy;
     } else {
-      localStore.healthIds.push({ ...this });
+      localStore.healthIds.push(copy);
     }
     persistLocalStore();
     return this;
@@ -135,11 +220,13 @@ const wrapSessionDoc = (raw) => {
   doc._id = String(raw._id || raw.id || new mongoose.Types.ObjectId());
   doc.id = doc._id;
   doc.save = async function () {
+    const copy = { ...this };
+    delete copy.save;
     const idx = localStore.sessions.findIndex((s) => String(s.sessionId) === String(this.sessionId));
     if (idx !== -1) {
-      localStore.sessions[idx] = { ...this };
+      localStore.sessions[idx] = copy;
     } else {
-      localStore.sessions.push({ ...this });
+      localStore.sessions.push(copy);
     }
     persistLocalStore();
     return this;
@@ -170,6 +257,9 @@ const MongoDb = {
           }
           if (filter.roleId) {
             query.roleId = String(filter.roleId).trim();
+          }
+          if (filter.role) {
+            query.role = filter.role;
           }
           if (filter.healthId) {
             if (typeof filter.healthId === 'string') {
@@ -203,14 +293,13 @@ const MongoDb = {
       const cleanHealthId = typeof filter.healthId === 'string' ? filter.healthId.toUpperCase().trim() : null;
 
       const found = localStore.users.find((u) => {
-        if (cleanEmail && u.email && u.email.toLowerCase().trim() === cleanEmail) return true;
-        if (targetId && String(u._id || u.id) === targetId) return true;
-        if (targetRoleId && u.roleId && String(u.roleId).trim() === targetRoleId) return true;
+        if (filter.role && u.role !== filter.role) return false;
+        if (cleanEmail) return Boolean(u.email && u.email.toLowerCase().trim() === cleanEmail);
+        if (targetId) return String(u._id || u.id) === targetId;
+        if (targetRoleId) return Boolean(u.roleId && String(u.roleId).trim() === targetRoleId);
         if (cleanHealthId && u.healthId) {
           const uHid = String(u.healthId).toUpperCase().trim();
-          if (uHid === cleanHealthId || uHid.replace(/[^A-Z0-9]/g, '') === cleanHealthId.replace(/[^A-Z0-9]/g, '')) {
-            return true;
-          }
+          return uHid === cleanHealthId || uHid.replace(/[^A-Z0-9]/g, '') === cleanHealthId.replace(/[^A-Z0-9]/g, '');
         }
         return false;
       });
@@ -233,7 +322,7 @@ const MongoDb = {
           const created = await User.create(payload);
           return created;
         } catch (err) {
-          if (err.code === 11000) throw err;
+          if (err.code === 11000 || err.name === 'ValidationError' || err.name === 'CastError') throw err;
           // Fall through to resilient store if database went offline
         }
       }
@@ -266,7 +355,7 @@ const MongoDb = {
           return await User.find(filter);
         } catch (err) {}
       }
-      return localStore.users.map(wrapUserDoc);
+      return localStore.users.filter((u) => matchesFilter(u, filter)).map(wrapUserDoc);
     }
   },
 
@@ -344,7 +433,7 @@ const MongoDb = {
           return await HealthId.find(filter);
         } catch (err) {}
       }
-      return localStore.healthIds.map(wrapHealthIdDoc);
+      return localStore.healthIds.filter((h) => matchesFilter(h, filter)).map(wrapHealthIdDoc);
     }
   },
 
@@ -356,12 +445,42 @@ const MongoDb = {
           const payload = { ...data };
           if (payload.id && !payload._id) payload._id = String(payload.id);
           return await Appointment.create(payload);
-        } catch (err) {}
+        } catch (err) {
+          if (err.code === 11000 || err.name === 'ValidationError') {
+            throw err;
+          }
+        }
       }
-      const payload = { ...data, _id: String(data._id || data.id || new mongoose.Types.ObjectId()), createdAt: new Date() };
+
+      const activeStatuses = ['Pending', 'Confirmed', 'Upcoming', 'In Consultation'];
+      const shouldLockSlot = data.activeSlot !== false && activeStatuses.includes(data.status || 'Pending');
+      if (shouldLockSlot) {
+        const conflict = localStore.appointments.find(
+          (a) =>
+            String(a.doctorId) === String(data.doctorId) &&
+            String(a.date) === String(data.date) &&
+            String(a.time).trim().toLowerCase() === String(data.time).trim().toLowerCase() &&
+            a.activeSlot !== false &&
+            activeStatuses.includes(a.status)
+        );
+        if (conflict) {
+          const dupError = new Error('This appointment slot is already booked.');
+          dupError.code = 11000;
+          throw dupError;
+        }
+      }
+
+      const payload = {
+        ...data,
+        _id: String(data._id || data.id || new mongoose.Types.ObjectId()),
+        activeSlot: shouldLockSlot,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      payload.id = payload._id;
       localStore.appointments.push(payload);
       persistLocalStore();
-      return payload;
+      return wrapAppointmentDoc(payload);
     },
 
     async find(filter = {}) {
@@ -370,7 +489,10 @@ const MongoDb = {
           return await Appointment.find(filter).sort({ date: -1, createdAt: -1 });
         } catch (err) {}
       }
-      return [...localStore.appointments].reverse();
+      return [...localStore.appointments]
+        .filter((a) => matchesFilter(a, filter))
+        .reverse()
+        .map(wrapAppointmentDoc);
     },
 
     async findById(id) {
@@ -380,7 +502,42 @@ const MongoDb = {
           return await Appointment.findOne({ _id: String(id) });
         } catch (err) {}
       }
-      return localStore.appointments.find((a) => String(a._id || a.id) === String(id)) || null;
+      const found = localStore.appointments.find((a) => String(a._id || a.id) === String(id)) || null;
+      return wrapAppointmentDoc(found);
+    },
+
+    async findOneAndUpdate(filter = {}, update = {}) {
+      if (isDatabaseConnected()) {
+        try {
+          return await Appointment.findOneAndUpdate(filter, update, { new: true });
+        } catch (err) {
+          if (err.code === 11000 || err.name === 'ValidationError' || err.name === 'CastError') throw err;
+        }
+      }
+      const idx = localStore.appointments.findIndex((a) => matchesFilter(a, filter));
+      if (idx === -1) return null;
+      const setData = update.$set || update;
+      const merged = { ...localStore.appointments[idx], ...setData, updatedAt: new Date() };
+      if (merged.activeSlot === true) {
+        const activeStatuses = ['Pending', 'Confirmed', 'Upcoming', 'In Consultation'];
+        const conflict = localStore.appointments.find(
+          (a, i) =>
+            i !== idx &&
+            String(a.doctorId) === String(merged.doctorId) &&
+            String(a.date) === String(merged.date) &&
+            String(a.time).trim().toLowerCase() === String(merged.time).trim().toLowerCase() &&
+            a.activeSlot !== false &&
+            activeStatuses.includes(a.status)
+        );
+        if (conflict) {
+          const dupError = new Error('This appointment slot is already booked.');
+          dupError.code = 11000;
+          throw dupError;
+        }
+      }
+      localStore.appointments[idx] = merged;
+      persistLocalStore();
+      return wrapAppointmentDoc(merged);
     },
 
     async deleteById(id) {
@@ -420,7 +577,7 @@ const MongoDb = {
           return await Prescription.find(filter).sort({ date: -1, createdAt: -1 });
         } catch (err) {}
       }
-      return [...localStore.prescriptions].reverse();
+      return [...localStore.prescriptions].filter((p) => matchesFilter(p, filter)).reverse();
     },
 
     async findById(id) {
@@ -470,7 +627,7 @@ const MongoDb = {
           return await PharmacyOrder.find(filter).sort({ createdAt: -1 });
         } catch (err) {}
       }
-      return [...localStore.pharmacyOrders].reverse();
+      return [...localStore.pharmacyOrders].filter((o) => matchesFilter(o, filter)).reverse();
     },
 
     async findById(id) {
@@ -520,7 +677,7 @@ const MongoDb = {
           return await AmbulanceRequest.find(filter).sort({ createdAt: -1 });
         } catch (err) {}
       }
-      return [...localStore.ambulanceRequests].reverse();
+      return [...localStore.ambulanceRequests].filter((r) => matchesFilter(r, filter)).reverse();
     },
 
     async findById(id) {
@@ -556,7 +713,7 @@ const MongoDb = {
           return await Conversation.find(filter).sort({ lastUpdated: -1 });
         } catch (err) {}
       }
-      return [...localStore.conversations].reverse();
+      return [...localStore.conversations].filter((c) => matchesFilter(c, filter)).reverse();
     },
 
     async findById(id) {
@@ -585,15 +742,24 @@ const MongoDb = {
     async upsert(id, userId, data) {
       if (isDatabaseConnected()) {
         try {
+          const existing = await Conversation.findOne({ _id: String(id) });
+          if (existing && String(existing.userId) !== String(userId)) {
+            throw new Error('Unauthorized conversation update');
+          }
           const payload = { ...data, userId: String(userId), lastUpdated: new Date() };
           return await Conversation.findOneAndUpdate(
             { _id: String(id), userId: String(userId) },
             { $set: payload },
             { upsert: true, new: true, setDefaultsOnInsert: true }
           );
-        } catch (err) {}
+        } catch (err) {
+          if (err.message === 'Unauthorized conversation update') throw err;
+        }
       }
       const idx = localStore.conversations.findIndex((c) => String(c._id || c.id) === String(id));
+      if (idx !== -1 && String(localStore.conversations[idx].userId) !== String(userId)) {
+        throw new Error('Unauthorized conversation update');
+      }
       const payload = { ...data, _id: String(id), id: String(id), userId: String(userId), lastUpdated: new Date() };
       if (idx !== -1) {
         localStore.conversations[idx] = { ...localStore.conversations[idx], ...payload };
@@ -628,9 +794,16 @@ const MongoDb = {
           return await Conversation.deleteMany(filter);
         } catch (err) {}
       }
-      localStore.conversations = [];
+      const before = localStore.conversations.length;
+      if (filter.userId) {
+        localStore.conversations = localStore.conversations.filter(
+          (c) => String(c.userId) !== String(filter.userId)
+        );
+      } else {
+        localStore.conversations = [];
+      }
       persistLocalStore();
-      return { acknowledged: true, deletedCount: 1 };
+      return { acknowledged: true, deletedCount: before - localStore.conversations.length };
     }
   },
 
@@ -713,10 +886,15 @@ const MongoDb = {
     async shareWithDoctor(reportId, patientId, doctorData) {
       if (isDatabaseConnected()) {
         try {
+          const existingReport = await MedicalReport.findOne({ _id: String(reportId), patientId: String(patientId) });
+          if (!existingReport) return null;
+          const alreadyShared = Array.isArray(existingReport.sharedWithDoctors) &&
+            existingReport.sharedWithDoctors.some((d) => String(d.doctorId) === String(doctorData.doctorId));
+          if (alreadyShared) return existingReport;
           return await MedicalReport.findOneAndUpdate(
             { _id: String(reportId), patientId: String(patientId) },
             {
-              $addToSet: {
+              $push: {
                 sharedWithDoctors: {
                   doctorId: String(doctorData.doctorId),
                   doctorName: doctorData.doctorName || 'Doctor',
@@ -734,12 +912,34 @@ const MongoDb = {
       );
       if (r) {
         r.sharedWithDoctors = r.sharedWithDoctors || [];
-        r.sharedWithDoctors.push({
-          doctorId: String(doctorData.doctorId),
-          doctorName: doctorData.doctorName || 'Doctor',
-          sharedAt: new Date(),
-          reviewStatus: 'Pending Review'
-        });
+        if (!r.sharedWithDoctors.some((d) => String(d.doctorId) === String(doctorData.doctorId))) {
+          r.sharedWithDoctors.push({
+            doctorId: String(doctorData.doctorId),
+            doctorName: doctorData.doctorName || 'Doctor',
+            sharedAt: new Date(),
+            reviewStatus: 'Pending Review'
+          });
+          persistLocalStore();
+        }
+      }
+      return r;
+    },
+
+    async revokeDoctorAccess(reportId, patientId, doctorId) {
+      if (isDatabaseConnected()) {
+        try {
+          return await MedicalReport.findOneAndUpdate(
+            { _id: String(reportId), patientId: String(patientId) },
+            { $pull: { sharedWithDoctors: { doctorId: String(doctorId) } } },
+            { new: true }
+          );
+        } catch (err) {}
+      }
+      const r = localStore.medicalReports.find(
+        (m) => String(m._id || m.id) === String(reportId) && String(m.patientId) === String(patientId)
+      );
+      if (r && Array.isArray(r.sharedWithDoctors)) {
+        r.sharedWithDoctors = r.sharedWithDoctors.filter((d) => String(d.doctorId) !== String(doctorId));
         persistLocalStore();
       }
       return r;
@@ -863,6 +1063,40 @@ const MongoDb = {
       });
       persistLocalStore();
       return { deletedCount: before - localStore.sessions.length };
+    }
+  },
+
+  // --- AUDIT LOGS ---
+  auditLogs: {
+    async create(data) {
+      if (isDatabaseConnected()) {
+        try {
+          return await AuditLog.create(data);
+        } catch (err) {}
+      }
+      const payload = {
+        ...data,
+        _id: String(data._id || `aud_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`),
+        createdAt: new Date()
+      };
+      localStore.auditLogs.push(payload);
+      if (localStore.auditLogs.length > 500) {
+        localStore.auditLogs = localStore.auditLogs.slice(-500);
+      }
+      persistLocalStore();
+      return payload;
+    },
+
+    async find(filter = {}) {
+      if (isDatabaseConnected()) {
+        try {
+          return await AuditLog.find(filter).sort({ createdAt: -1 }).limit(100);
+        } catch (err) {}
+      }
+      return [...localStore.auditLogs]
+        .filter((log) => matchesFilter(log, filter))
+        .reverse()
+        .slice(0, 100);
     }
   }
 };

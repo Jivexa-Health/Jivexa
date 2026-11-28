@@ -62,10 +62,13 @@ const requireDbConnection = (req, res, next) => {
   next();
 };
 
-// Auth, Clinical, Pharmacy, Ambulance & AI API Routes
+// Auth, Clinical, Doctor, Admin, Pharmacy, Ambulance & AI API Routes
 const authRoutes = require('./routes/authRoutes');
 app.use('/api/auth', requireDbConnection, authRoutes);
 app.use('/user', requireDbConnection, authRoutes);
+app.use('/api/doctors', requireDbConnection, require('./routes/doctorRoutes'));
+app.use('/api/doctor', requireDbConnection, require('./routes/doctorAuthRoutes'));
+app.use('/api/admin', requireDbConnection, require('./routes/adminRoutes'));
 app.use('/api/health-id', require('./routes/healthIdRoutes'));
 app.use('/api/appointments', require('./routes/appointmentRoutes'));
 app.use('/api/prescriptions', require('./routes/prescriptionRoutes'));
@@ -100,20 +103,24 @@ app.get('/api/health', async (req, res) => {
     },
     mvpMode: {
       patientMvpOnly: config.auth.patientMvpOnly,
-      mode: config.auth.patientMvpOnly ? 'PATIENT_FIRST_MVP' : 'FULL_ECOSYSTEM',
+      mode: 'PATIENT_AND_DOCTOR_MVP',
       activeModules: [
         'PATIENT_SIGNUP',
         'PATIENT_LOGIN',
         'EMAIL_VERIFICATION',
         'PATIENT_DASHBOARD',
         'PATIENT_PROFILE',
+        'FIND_DOCTOR',
+        'APPOINTMENT_BOOKING',
         'AI_HEALTH_REPORT_ANALYZER',
         'AI_HEALTH_CHATBOT',
         'HEALTH_RECORDS',
-        'HEALTH_ID'
+        'HEALTH_ID',
+        'DOCTOR_PORTAL',
+        'DOCTOR_DASHBOARD',
+        'DOCTOR_APPOINTMENT_MANAGEMENT'
       ],
       upcomingModules: [
-        { name: 'Doctor Consultations & Appointments', version: 'V2', status: 'COMING_SOON' },
         { name: 'Pharmacy & Medicine Delivery', version: 'V3', status: 'COMING_SOON' },
         { name: 'Ambulance Partner Emergency Fleet', version: 'V4', status: 'COMING_SOON' },
         { name: 'Hospital & Healthcare Ecosystem Admin', version: 'V5', status: 'COMING_SOON' }
@@ -166,31 +173,7 @@ const startServer = async () => {
       process.exit(1);
     }
 
-    // 1. Connect to MongoDB with startup retry (up to 3 attempts)
-    if (isMongoConfigured()) {
-      console.log(`[MongoDB] URI detected (${config.db.getMaskedUri()}). Connecting to MongoDB...`);
-      const MAX_RETRIES = 3;
-      const RETRY_DELAY_MS = 1500;
-      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-          await connectDB();
-          if (isDatabaseConnected()) break;
-        } catch (err) {
-          console.warn(`[MongoDB] Startup connection attempt ${attempt}/${MAX_RETRIES} error:`, err.message);
-        }
-        if (!isDatabaseConnected() && attempt < MAX_RETRIES) {
-          console.log(`[MongoDB] Retrying database connection in ${RETRY_DELAY_MS}ms (attempt ${attempt}/${MAX_RETRIES})...`);
-          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-        }
-      }
-      if (!isDatabaseConnected()) {
-        console.warn('[MongoDB] Failed to connect to MongoDB after 3 attempts. Server will run in degraded mode.');
-      }
-    } else {
-      console.warn('[MongoDB] Database URI (MONGO_URI / MONGO_URL) is not set in backend/.env. Server will run in degraded mode until configured.');
-    }
-
-    // 2. Start Express server and attach error listeners (dual-stack listening)
+    // 1. Start Express HTTP listener immediately so health & SSE routes never fail startup 503s while Atlas connects
     const listenCallback = () => {
       console.log(
         `[JIVEXA Backend] Production-Grade Auth Server running in ${
@@ -211,6 +194,32 @@ const startServer = async () => {
         console.error('[JIVEXA Backend] Server error:', err.message);
       }
     });
+
+    // 2. Connect to MongoDB with bounded background retry (up to 3 attempts) without blocking HTTP readiness
+    if (isMongoConfigured()) {
+      console.log(`[MongoDB] URI detected (${config.db.getMaskedUri()}). Connecting to MongoDB...`);
+      (async () => {
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY_MS = 1500;
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            await connectDB();
+            if (isDatabaseConnected()) break;
+          } catch (err) {
+            console.warn(`[MongoDB] Startup connection attempt ${attempt}/${MAX_RETRIES} error:`, err.message);
+          }
+          if (!isDatabaseConnected() && attempt < MAX_RETRIES) {
+            console.log(`[MongoDB] Retrying database connection in ${RETRY_DELAY_MS}ms (attempt ${attempt}/${MAX_RETRIES})...`);
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+          }
+        }
+        if (!isDatabaseConnected()) {
+          console.warn('[MongoDB] Failed to connect to MongoDB after 3 attempts. Server will run in degraded mode.');
+        }
+      })();
+    } else {
+      console.warn('[MongoDB] Database URI (MONGO_URI / MONGO_URL) is not set in backend/.env. Server will run in degraded mode until configured.');
+    }
   } catch (error) {
     console.error('[JIVEXA Backend] Unexpected startup error:', error);
     process.exit(1);

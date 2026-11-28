@@ -61,15 +61,9 @@ export const PublicLayout: React.FC<{ children: React.ReactNode }> = ({ children
             <Link to="/health-id-lookup" style={{ color: 'var(--primary)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
               <Shield size={16} /> Health ID Lookup
             </Link>
-            {!isPatientMvpOnly() ? (
-              <>
-                <Link to="/for-doctors" style={{ color: 'var(--text-main)', fontWeight: 500 }}>For Doctors</Link>
-                <Link to="/for-pharmacies" style={{ color: 'var(--text-main)', fontWeight: 500 }}>For Pharmacies</Link>
-              </>
-            ) : (
-              <span style={{ fontSize: '0.74rem', fontWeight: 800, backgroundColor: 'rgba(2, 132, 199, 0.1)', color: 'var(--primary)', padding: '4px 10px', borderRadius: '12px' }}>
-                Patient AI Health MVP
-              </span>
+            <Link to="/for-doctors" style={{ color: 'var(--text-main)', fontWeight: 500 }}>For Doctors</Link>
+            {!isPatientMvpOnly() && (
+              <Link to="/for-pharmacies" style={{ color: 'var(--text-main)', fontWeight: 500 }}>For Pharmacies</Link>
             )}
             <Link to="/faq" style={{ color: 'var(--text-main)', fontWeight: 500 }}>FAQs</Link>
             <Link to="/contact" style={{ color: 'var(--text-main)', fontWeight: 500 }}>Contact</Link>
@@ -285,6 +279,8 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
   const sidebarLinks: Record<string, { label: string; path: string; icon: React.ReactNode; comingSoon?: boolean }[]> = {
     PATIENT: isMvp ? [
       { label: 'Dashboard', path: '/patient/dashboard', icon: <Home size={18} /> },
+      { label: 'Find Doctor', path: '/patient/doctors', icon: <UserCheck size={18} /> },
+      { label: 'My Appointments', path: '/patient/appointments', icon: <Calendar size={18} /> },
       { label: 'Digital Health ID', path: '/patient/health-id', icon: <ShieldCheck size={18} /> },
       { label: 'JIVEXA Health AI', path: '/patient/ai-assistant', icon: <MessageSquare size={18} /> },
       { label: 'AI Report Analyzer', path: '/patient/ai-report-analyzer', icon: <FileText size={18} /> },
@@ -306,8 +302,8 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
       { label: 'Settings', path: '/patient/settings', icon: <Settings size={18} /> },
     ],
     DOCTOR: [
-      { label: 'Overview Dashboard', path: '/doctor/dashboard', icon: <Home size={18} /> },
-      { label: 'Doctor Settings', path: '/doctor/settings', icon: <Settings size={18} /> },
+      { label: 'Doctor Dashboard', path: '/doctor/dashboard', icon: <Home size={18} /> },
+      { label: 'Profile & Schedule', path: '/doctor/settings', icon: <Settings size={18} /> },
     ],
     PHARMACY: [
       { label: 'Order Dashboard', path: '/pharmacy/dashboard', icon: <ListOrdered size={18} /> },
@@ -371,7 +367,7 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
 
         <nav style={{ flex: 1, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: '3px', overflowY: 'auto' }}>
           {activeLinks.map((link) => {
-            const isActive = location.pathname === link.path;
+            const isActive = location.pathname === link.path || (link.path === '/patient/doctors' && location.pathname.startsWith('/patient/doctors/'));
             return (
               <Link 
                 key={link.path} 

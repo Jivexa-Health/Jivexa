@@ -8,6 +8,7 @@ const {
   getMedicalReports,
   getMedicalReportById,
   shareMedicalReport,
+  revokeMedicalReportShare,
   deleteMedicalReport,
   getUserUsageStats, 
   upgradeUserPro, 
@@ -50,5 +51,6 @@ router.get('/reports/:id', protect, getMedicalReportById);
 router.post('/reports', protect, saveMedicalReport);
 router.delete('/reports/:id', protect, deleteMedicalReport);
 router.post('/reports/:id/share', protect, shareMedicalReport);
+router.delete('/reports/:id/share/:doctorId', protect, revokeMedicalReportShare);
 
 module.exports = router;
