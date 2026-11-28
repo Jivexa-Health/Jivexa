@@ -21,7 +21,7 @@
     "express": "^4.22.2",
     "express-validator": "^7.1.0",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^9.11.2",
+    "mongoose": "^9.13.1",
     "nodemailer": "^9.0.5",
     "openai": "^7.5.0",
     "pako": "^3.0.2",

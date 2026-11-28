@@ -14,10 +14,33 @@ const app = express();
 // Trust proxy for secure cookies behind reverse proxies (Render, Cloudflare, Vercel, etc.)
 app.set('trust proxy', 1);
 
-// Configure CORS for Cookie & Authorization header transmission across any deployed origin
+// Configure CORS for Cookie & Authorization header transmission across trusted JIVEXA origins
+const configuredCorsOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
+const ALLOWED_EXACT_ORIGINS = new Set([
+  config.server.frontendUrl.replace(/\/$/, ''),
+  'https://jivexa-mvp.vercel.app',
+  'https://frontend-beryl-two-18.vercel.app',
+  'https://jivexa.in',
+  'https://www.jivexa.in',
+  ...configuredCorsOrigins
+].filter(Boolean));
+
+const isAllowedCorsOrigin = (origin) => {
+  if (!origin) return true; // Non-browser clients, health probes, and local server tests
+  const cleanOrigin = origin.replace(/\/$/, '');
+  if (ALLOWED_EXACT_ORIGINS.has(cleanOrigin)) return true;
+  if (/^https:\/\/(?:jivexa|frontend)[a-z0-9-]*\.vercel\.app$/i.test(cleanOrigin)) return true;
+  if (/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?::\d+)?$/i.test(cleanOrigin)) return true;
+  return false;
+};
+
 const corsOptions = {
   origin: (origin, callback) => {
-    callback(null, true);
+    callback(null, isAllowedCorsOrigin(origin));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
